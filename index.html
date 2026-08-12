@@ -9,6 +9,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <!-- MQTT.js -->
+    <script src="https://unpkg.com/mqtt@5.0.0/dist/mqtt.min.js"></script>
     <link rel="stylesheet" href="style.css">
     <script src="script.js" defer></script>
 </head>
@@ -24,7 +30,7 @@
                     <span class="brand-icon">🌱</span>
                     <div class="brand-text">
                         <span class="brand-name">Smart Farming</span>
-                        <span class="brand-sub">IoT System v1.0</span>
+                        <span class="brand-sub">IoT System v2.0</span>
                     </div>
                 </div>
                 <button class="mobile-close-btn" id="mobileCloseBtn" aria-label="Tutup menu navigation">
@@ -66,10 +72,10 @@
 
             <div class="sidebar-footer">
                 <div class="connection-status">
-                    <span class="status-indicator online"></span>
+                    <span class="status-indicator online" id="sidebarStatusDot"></span>
                     <div class="connection-text">
-                        <span class="connection-title">HiveMQ MQTT</span>
-                        <span class="connection-sub">Ready for WSS</span>
+                        <span class="connection-title" id="sidebarStatusTitle">MQTT</span>
+                        <span class="connection-sub" id="sidebarStatusSub">Connecting...</span>
                     </div>
                 </div>
             </div>
@@ -90,17 +96,17 @@
                 </div>
 
                 <div class="header-right">
-                    <div class="status-pill online">
-                        <span class="pulse-dot"></span>
+                    <div class="status-pill online" id="headerStatusPill">
+                        <span class="pulse-dot" id="headerStatusDot"></span>
                         <span id="headerSystemStatus">SYSTEM ONLINE</span>
                     </div>
                     <div class="last-update" id="headerLastUpdate">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                        <span>Last update: <strong id="lastUpdateTime">Just now</strong></span>
+                        <span>Last update: <strong id="lastUpdateTime">--:--:--</strong></span>
                     </div>
-                    <button class="action-btn-sm" id="btnSimulateTick" title="Simulasikan Data Sensor Realtime">
+                    <button class="action-btn-sm" id="btnReconnectMQTT" title="Reconnect MQTT">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
-                        <span>Simulate</span>
+                        <span>Reconnect</span>
                     </button>
                 </div>
             </header>
@@ -123,7 +129,7 @@
                             <p class="card-desc" id="sysStatusSub">All systems operating normally</p>
                             <div class="status-footer">
                                 <span class="footer-label">Last update</span>
-                                <span class="footer-value" id="sysStatusTime">01:42:18</span>
+                                <span class="footer-value" id="sysStatusTime">--:--:--</span>
                             </div>
                         </div>
                     </div>
@@ -137,16 +143,16 @@
                             </div>
                             <span class="trend-badge trend-up" id="tempTrend">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
-                                <span>+0.2°</span>
+                                <span id="tempTrendText">+0.0°</span>
                             </span>
                         </div>
                         <div class="card-body">
                             <div class="sensor-value-container">
-                                <span class="sensor-value" id="valTemperature">28.4</span>
+                                <span class="sensor-value" id="valTemperature">--</span>
                                 <span class="sensor-unit">°C</span>
                             </div>
                             <div class="sensor-status-row">
-                                <span class="badge badge-outline-success" id="statusTemperature">Normal</span>
+                                <span class="badge badge-outline-success" id="statusTemperature">--</span>
                                 <span class="sensor-meta">Target: 25-30°C</span>
                             </div>
                         </div>
@@ -161,16 +167,16 @@
                             </div>
                             <span class="trend-badge trend-neutral" id="humidityTrend">
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                <span>Stable</span>
+                                <span id="humidityTrendText">Stable</span>
                             </span>
                         </div>
                         <div class="card-body">
                             <div class="sensor-value-container">
-                                <span class="sensor-value" id="valHumidity">72</span>
+                                <span class="sensor-value" id="valHumidity">--</span>
                                 <span class="sensor-unit">%</span>
                             </div>
                             <div class="sensor-status-row">
-                                <span class="badge badge-outline-success" id="statusHumidity">Normal</span>
+                                <span class="badge badge-outline-success" id="statusHumidity">--</span>
                                 <span class="sensor-meta">Ideal: 60-80%</span>
                             </div>
                         </div>
@@ -186,16 +192,16 @@
                         </div>
                         <div class="card-body">
                             <div class="sensor-value-container">
-                                <span class="sensor-value" id="valSoilMoisture">43</span>
+                                <span class="sensor-value" id="valSoilMoisture">--</span>
                                 <span class="sensor-unit">%</span>
                             </div>
                             <div class="progress-container">
                                 <div class="progress-bar">
-                                    <div class="progress-fill progress-soil" id="barSoilMoisture" style="width: 43%;"></div>
+                                    <div class="progress-fill progress-soil" id="barSoilMoisture" style="width: 0%;"></div>
                                 </div>
                             </div>
                             <div class="sensor-status-row">
-                                <span class="sensor-status-text" id="statusSoilMoisture">Moisture Level: Good</span>
+                                <span class="sensor-status-text" id="statusSoilMoisture">--</span>
                             </div>
                         </div>
                     </div>
@@ -210,16 +216,16 @@
                         </div>
                         <div class="card-body">
                             <div class="sensor-value-container">
-                                <span class="sensor-value" id="valWaterLevel">78</span>
+                                <span class="sensor-value" id="valWaterLevel">--</span>
                                 <span class="sensor-unit">%</span>
                             </div>
                             <div class="progress-container">
                                 <div class="progress-bar">
-                                    <div class="progress-fill progress-water" id="barWaterLevel" style="width: 78%;"></div>
+                                    <div class="progress-fill progress-water" id="barWaterLevel" style="width: 0%;"></div>
                                 </div>
                             </div>
                             <div class="sensor-status-row">
-                                <span class="sensor-status-text" id="statusWaterLevel">Water Level: Good</span>
+                                <span class="sensor-status-text" id="statusWaterLevel">--</span>
                             </div>
                         </div>
                     </div>
@@ -245,30 +251,29 @@
                             <div class="telemetry-summary">
                                 <div class="telemetry-pill">
                                     <span class="telemetry-label">Temperature</span>
-                                    <span class="telemetry-val" id="envTemp">28.4 °C</span>
+                                    <span class="telemetry-val" id="envTemp">-- °C</span>
                                 </div>
                                 <div class="telemetry-pill">
                                     <span class="telemetry-label">Humidity</span>
-                                    <span class="telemetry-val" id="envHumidity">72 %</span>
+                                    <span class="telemetry-val" id="envHumidity">-- %</span>
                                 </div>
                                 <div class="telemetry-pill">
                                     <span class="telemetry-label">Light</span>
-                                    <span class="telemetry-val highlight-amber" id="envLight">DAY</span>
+                                    <span class="telemetry-val highlight-amber" id="envLight">--</span>
                                 </div>
                                 <div class="telemetry-pill">
                                     <span class="telemetry-label">Soil Moisture</span>
-                                    <span class="telemetry-val" id="envSoil">43 %</span>
+                                    <span class="telemetry-val" id="envSoil">-- %</span>
                                 </div>
                                 <div class="telemetry-pill">
                                     <span class="telemetry-label">Water Tank</span>
-                                    <span class="telemetry-val" id="envWater">78 %</span>
+                                    <span class="telemetry-val" id="envWater">-- %</span>
                                 </div>
                             </div>
 
                             <!-- Canvas Chart Container -->
                             <div class="chart-wrapper">
                                 <canvas id="environmentChart" width="800" height="260"></canvas>
-                                <div class="chart-tooltip" id="chartTooltip"></div>
                             </div>
                         </div>
                     </div>
@@ -315,9 +320,9 @@
                                     </div>
                                 </div>
                                 <div class="actuator-state-control">
-                                    <span class="state-text active" id="stateLamp">MENYALA</span>
+                                    <span class="state-text" id="stateLamp">MATI</span>
                                     <label class="toggle-switch switch-sm" title="Sakelar Manual Lampu Grow Light">
-                                        <input type="checkbox" id="toggleLampManual" checked>
+                                        <input type="checkbox" id="toggleLampManual">
                                         <span class="slider"></span>
                                     </label>
                                 </div>
@@ -351,7 +356,7 @@
                                     </div>
                                     <div>
                                         <h3 class="actuator-name">SISTEM MCU</h3>
-                                        <span class="actuator-mode">ESP32 Status OK</span>
+                                        <span class="actuator-mode" id="systemMCUStatus">ESP32 Status OK</span>
                                     </div>
                                 </div>
                                 <div class="actuator-state">
@@ -415,7 +420,7 @@
                                 <div class="auto-metrics-grid">
                                     <div class="auto-metric-box">
                                         <span class="auto-metric-lbl">Kelembaban Tanah</span>
-                                        <span class="auto-metric-val" id="autoSoilCurrent">43 %</span>
+                                        <span class="auto-metric-val" id="autoSoilCurrent">-- %</span>
                                     </div>
                                     <div class="auto-metric-box">
                                         <span class="auto-metric-lbl">Ambang Batas</span>
@@ -446,7 +451,7 @@
                                             <span class="switch-sub" id="subTextLamp">Tekan untuk menyalakan/mematikan lampu grow light</span>
                                         </div>
                                         <label class="toggle-switch switch-lg">
-                                            <input type="checkbox" id="toggleLampCard" checked>
+                                            <input type="checkbox" id="toggleLampCard">
                                             <span class="slider"></span>
                                         </label>
                                     </div>
@@ -461,7 +466,7 @@
                                 <div class="auto-metrics-grid">
                                     <div class="auto-metric-box">
                                         <span class="auto-metric-lbl">Sensor Cahaya</span>
-                                        <span class="auto-metric-val highlight-amber" id="autoLightStatus">DAY (SIANG)</span>
+                                        <span class="auto-metric-val highlight-amber" id="autoLightStatus">--</span>
                                     </div>
                                     <div class="auto-metric-box">
                                         <span class="auto-metric-lbl">Mode Operasi</span>
@@ -469,7 +474,7 @@
                                     </div>
                                     <div class="auto-metric-box">
                                         <span class="auto-metric-lbl">Status Lampu</span>
-                                        <span class="badge badge-on" id="autoLightLampStatus">MENYALA (ON)</span>
+                                        <span class="badge badge-off" id="autoLightLampStatus">MATI (OFF)</span>
                                     </div>
                                 </div>
                             </div>
@@ -486,7 +491,7 @@
                                 <h2 class="card-title">Camera Monitor</h2>
                                 <p class="card-subtitle">Pengambilan citra realtime dari ESP32-CAM</p>
                             </div>
-                            <span class="badge badge-success">LIVE READY</span>
+                            <span class="badge badge-success" id="cameraStatusBadge">LIVE READY</span>
                         </div>
 
                         <div class="card-body">
@@ -524,7 +529,7 @@
                                     </div>
                                     <div class="meta-item">
                                         <span class="meta-lbl">Status:</span>
-                                        <span class="meta-val status-online">READY</span>
+                                        <span class="meta-val status-online" id="cameraMetaStatus">READY</span>
                                     </div>
                                 </div>
                             </div>
@@ -574,6 +579,7 @@
             </div>
         </div>
     </div>
+    
     <!-- TOAST NOTIFICATION CONTAINER -->
     <div class="toast-container" id="toastContainer"></div>
 </body>
