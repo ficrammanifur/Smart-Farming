@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Farming — IoT Plant Monitoring & Automation System</title>
+    <meta name="description" content="Dashboard monitoring dan kontrol Smart Farming IoT realtime.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+</head>
+<body>
+    <div class="app-layout">
+        <!-- Overlay Mobile Sidebar -->
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+        <!-- SIDEBAR -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="brand">
+                    <span class="brand-icon">🌱</span>
+                    <div class="brand-text">
+                        <span class="brand-name">Smart Farming</span>
+                        <span class="brand-sub">IoT System v1.0</span>
+                    </div>
+                </div>
+                <button class="mobile-close-btn" id="mobileCloseBtn" aria-label="Tutup menu navigation">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-section">
+                    <span class="nav-section-title">MAIN NAVIGATION</span>
+                    <a href="#dashboard" class="nav-item active" id="navDashboard">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+                        <span>Dashboard</span>
+                    </a>
+                    <a href="#monitoring" class="nav-item" id="navMonitoring">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                        <span>Monitoring</span>
+                    </a>
+                    <a href="#camera" class="nav-item" id="navCamera">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                        <span>Camera</span>
+                    </a>
+                </div>
+
+                <div class="nav-divider"></div>
+
+                <div class="nav-section">
+                    <span class="nav-section-title">MANAGEMENT</span>
+                    <a href="#system" class="nav-item" id="navSystem">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                        <span>System</span>
+                    </a>
+                    <a href="#settings" class="nav-item" id="navSettings">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                        <span>Settings</span>
+                    </a>
+                </div>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="connection-status">
+                    <span class="status-indicator online"></span>
+                    <div class="connection-text">
+                        <span class="connection-title">HiveMQ MQTT</span>
+                        <span class="connection-sub">Ready for WSS</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- MAIN CONTENT AREA -->
+        <main class="main-content">
+            <!-- HEADER -->
+            <header class="header">
+                <div class="header-left">
+                    <button class="mobile-toggle-btn" id="mobileToggleBtn" aria-label="Buka menu mobile">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                    </button>
+                    <div>
+                        <h1 class="header-title">Dashboard</h1>
+                        <p class="header-subtitle">Smart Farming IoT monitoring system</p>
+                    </div>
+                </div>
+
+                <div class="header-right">
+                    <div class="status-pill online">
+                        <span class="pulse-dot"></span>
+                        <span id="headerSystemStatus">SYSTEM ONLINE</span>
+                    </div>
+                    <div class="last-update" id="headerLastUpdate">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        <span>Last update: <strong id="lastUpdateTime">Just now</strong></span>
+                    </div>
+                    <button class="action-btn-sm" id="btnSimulateTick" title="Simulasikan Data Sensor Realtime">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                        <span>Simulate</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- DASHBOARD CONTENT CONTAINER -->
+            <div class="dashboard-body">
+                <!-- TOP SECTION: SYSTEM STATUS & SENSOR CARDS -->
+                <section class="section-grid grid-5">
+                    <!-- SYSTEM STATUS CARD -->
+                    <div class="card status-card">
+                        <div class="card-header">
+                            <span class="card-title-sm">SYSTEM STATUS</span>
+                            <span class="badge badge-success" id="sysStatusBadge">NORMAL</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="system-status-indicator">
+                                <span class="status-dot-lg online" id="sysStatusDot"></span>
+                                <span class="status-text-lg" id="sysStatusText">ONLINE</span>
+                            </div>
+                            <p class="card-desc" id="sysStatusSub">All systems operating normally</p>
+                            <div class="status-footer">
+                                <span class="footer-label">Last update</span>
+                                <span class="footer-value" id="sysStatusTime">01:42:18</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 1. TEMPERATURE CARD -->
+                    <div class="card sensor-card">
+                        <div class="card-header">
+                            <div class="sensor-header-title">
+                                <span class="sensor-icon icon-temp">🌡</span>
+                                <span class="card-title-sm">Temperature</span>
+                            </div>
+                            <span class="trend-badge trend-up" id="tempTrend">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                                <span>+0.2°</span>
+                            </span>
+                        </div>
+                        <div class="card-body">
+                            <div class="sensor-value-container">
+                                <span class="sensor-value" id="valTemperature">28.4</span>
+                                <span class="sensor-unit">°C</span>
+                            </div>
+                            <div class="sensor-status-row">
+                                <span class="badge badge-outline-success" id="statusTemperature">Normal</span>
+                                <span class="sensor-meta">Target: 25-30°C</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2. HUMIDITY CARD -->
+                    <div class="card sensor-card">
+                        <div class="card-header">
+                            <div class="sensor-header-title">
+                                <span class="sensor-icon icon-humidity">💧</span>
+                                <span class="card-title-sm">Humidity</span>
+                            </div>
+                            <span class="trend-badge trend-neutral" id="humidityTrend">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                <span>Stable</span>
+                            </span>
+                        </div>
+                        <div class="card-body">
+                            <div class="sensor-value-container">
+                                <span class="sensor-value" id="valHumidity">72</span>
+                                <span class="sensor-unit">%</span>
+                            </div>
+                            <div class="sensor-status-row">
+                                <span class="badge badge-outline-success" id="statusHumidity">Normal</span>
+                                <span class="sensor-meta">Ideal: 60-80%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. SOIL MOISTURE CARD -->
+                    <div class="card sensor-card">
+                        <div class="card-header">
+                            <div class="sensor-header-title">
+                                <span class="sensor-icon icon-soil">🌱</span>
+                                <span class="card-title-sm">Soil Moisture</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="sensor-value-container">
+                                <span class="sensor-value" id="valSoilMoisture">43</span>
+                                <span class="sensor-unit">%</span>
+                            </div>
+                            <div class="progress-container">
+                                <div class="progress-bar">
+                                    <div class="progress-fill progress-soil" id="barSoilMoisture" style="width: 43%;"></div>
+                                </div>
+                            </div>
+                            <div class="sensor-status-row">
+                                <span class="sensor-status-text" id="statusSoilMoisture">Moisture Level: Good</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. WATER TANK CARD -->
+                    <div class="card sensor-card">
+                        <div class="card-header">
+                            <div class="sensor-header-title">
+                                <span class="sensor-icon icon-water">🚰</span>
+                                <span class="card-title-sm">Water Tank</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="sensor-value-container">
+                                <span class="sensor-value" id="valWaterLevel">78</span>
+                                <span class="sensor-unit">%</span>
+                            </div>
+                            <div class="progress-container">
+                                <div class="progress-bar">
+                                    <div class="progress-fill progress-water" id="barWaterLevel" style="width: 78%;"></div>
+                                </div>
+                            </div>
+                            <div class="sensor-status-row">
+                                <span class="sensor-status-text" id="statusWaterLevel">Water Level: Good</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- MIDDLE SECTION: ENVIRONMENT MONITORING CHART & ACTUATOR STATUS -->
+                <section class="section-grid grid-main-split">
+                    <!-- ENVIRONMENT MONITORING PANEL & CHART -->
+                    <div class="card environment-panel">
+                        <div class="card-header">
+                            <div>
+                                <h2 class="card-title">Environment Monitoring</h2>
+                                <p class="card-subtitle">Real-time telemetri & grafik tren kondisi lingkungan</p>
+                            </div>
+                            <div class="chart-controls">
+                                <button class="chart-tab active" data-target="temp">Temperature</button>
+                                <button class="chart-tab" data-target="soil">Soil Moisture</button>
+                            </div>
+                        </div>
+
+                        <div class="card-body">
+                            <!-- Telemetry Pills Summary -->
+                            <div class="telemetry-summary">
+                                <div class="telemetry-pill">
+                                    <span class="telemetry-label">Temperature</span>
+                                    <span class="telemetry-val" id="envTemp">28.4 °C</span>
+                                </div>
+                                <div class="telemetry-pill">
+                                    <span class="telemetry-label">Humidity</span>
+                                    <span class="telemetry-val" id="envHumidity">72 %</span>
+                                </div>
+                                <div class="telemetry-pill">
+                                    <span class="telemetry-label">Light</span>
+                                    <span class="telemetry-val highlight-amber" id="envLight">DAY</span>
+                                </div>
+                                <div class="telemetry-pill">
+                                    <span class="telemetry-label">Soil Moisture</span>
+                                    <span class="telemetry-val" id="envSoil">43 %</span>
+                                </div>
+                                <div class="telemetry-pill">
+                                    <span class="telemetry-label">Water Tank</span>
+                                    <span class="telemetry-val" id="envWater">78 %</span>
+                                </div>
+                            </div>
+
+                            <!-- Canvas Chart Container -->
+                            <div class="chart-wrapper">
+                                <canvas id="environmentChart" width="800" height="260"></canvas>
+                                <div class="chart-tooltip" id="chartTooltip"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ACTUATOR STATUS & MANUAL QUICK TOGGLES -->
+                    <div class="card actuator-panel">
+                        <div class="card-header">
+                            <div>
+                                <h2 class="card-title">Status & Kontrol Perangkat</h2>
+                                <p class="card-subtitle">Kontrol langsung sakelar relay Lampu & Pompa</p>
+                            </div>
+                        </div>
+
+                        <div class="card-body actuator-list">
+                            <!-- Water Pump -->
+                            <div class="actuator-item" id="actuatorPump">
+                                <div class="actuator-info">
+                                    <div class="actuator-icon-box icon-pump" id="iconBoxPump">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+                                    </div>
+                                    <div>
+                                        <h3 class="actuator-name">POMPA AIR</h3>
+                                        <span class="actuator-mode" id="modeTextPump">Mode: Otomatis</span>
+                                    </div>
+                                </div>
+                                <div class="actuator-state-control">
+                                    <span class="state-text" id="statePump">MATI</span>
+                                    <label class="toggle-switch switch-sm" title="Sakelar Manual Pompa Air">
+                                        <input type="checkbox" id="togglePumpManual">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Grow Lamp -->
+                            <div class="actuator-item" id="actuatorLamp">
+                                <div class="actuator-info">
+                                    <div class="actuator-icon-box icon-lamp" id="iconBoxLamp">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/><circle cx="12" cy="12" r="4"/></svg>
+                                    </div>
+                                    <div>
+                                        <h3 class="actuator-name">LAMPU GROW LIGHT</h3>
+                                        <span class="actuator-mode" id="modeTextLamp">Mode: Otomatis</span>
+                                    </div>
+                                </div>
+                                <div class="actuator-state-control">
+                                    <span class="state-text active" id="stateLamp">MENYALA</span>
+                                    <label class="toggle-switch switch-sm" title="Sakelar Manual Lampu Grow Light">
+                                        <input type="checkbox" id="toggleLampManual" checked>
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Buzzer -->
+                            <div class="actuator-item" id="actuatorBuzzer">
+                                <div class="actuator-info">
+                                    <div class="actuator-icon-box icon-buzzer" id="iconBoxBuzzer">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                                    </div>
+                                    <div>
+                                        <h3 class="actuator-name">ALARM BUZZER</h3>
+                                        <span class="actuator-mode" id="modeTextBuzzer">Mode: Normal</span>
+                                    </div>
+                                </div>
+                                <div class="actuator-state-control">
+                                    <span class="state-text" id="stateBuzzer">MATI</span>
+                                    <label class="toggle-switch switch-sm" title="Sakelar Manual Buzzer">
+                                        <input type="checkbox" id="toggleBuzzerManual">
+                                        <span class="slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- System Indicator -->
+                            <div class="actuator-item" id="actuatorSystem">
+                                <div class="actuator-info">
+                                    <div class="actuator-icon-box icon-sys">
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                                    </div>
+                                    <div>
+                                        <h3 class="actuator-name">SISTEM MCU</h3>
+                                        <span class="actuator-mode">ESP32 Status OK</span>
+                                    </div>
+                                </div>
+                                <div class="actuator-state">
+                                    <span class="state-dot on" id="dotSystem"></span>
+                                    <span class="state-text active" id="stateSystem">NORMAL</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- SECTION 3: KONTROL PERANGKAT (MANUAL & OTOMATIS) -->
+                <section class="section-container" id="sectionControl">
+                    <div class="card automation-panel">
+                        <div class="card-header">
+                            <div>
+                                <h2 class="card-title">Pusat Kontrol Perangkat (Manual & Otomatis)</h2>
+                                <p class="card-subtitle">Pengaturan sakelar manual dan kontrol otomatis Pompa Air & Lampu</p>
+                            </div>
+                            <div class="auto-master-switch">
+                                <span class="switch-label">Mode Otomatis Global</span>
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="toggleGlobalAuto" checked>
+                                    <span class="slider"></span>
+                                </label>
+                                <span class="switch-badge" id="badgeGlobalAuto">AKTIF</span>
+                            </div>
+                        </div>
+
+                        <div class="card-body auto-grid">
+                            <!-- KONTROL POMPA AIR -->
+                            <div class="auto-card" id="cardControlPump">
+                                <div class="auto-card-header">
+                                    <span class="auto-card-icon">🚰</span>
+                                    <div>
+                                        <h3 class="auto-card-title">Kontrol Pompa Air</h3>
+                                        <span class="badge-mode-pill" id="badgePumpMode">Mode: Otomatis</span>
+                                    </div>
+                                </div>
+                                <p class="auto-card-desc">Siram otomatis aktif jika kelembaban &lt; 35%, atau aktifkan manual di bawah ini.</p>
+
+                                <div class="manual-control-box">
+                                    <div class="manual-switch-row">
+                                        <div class="switch-info">
+                                            <span class="switch-title">Sakelar Manual Pompa</span>
+                                            <span class="switch-sub" id="subTextPump">Tekan untuk menyalakan/mematikan pompa air</span>
+                                        </div>
+                                        <label class="toggle-switch switch-lg">
+                                            <input type="checkbox" id="togglePumpCard">
+                                            <span class="slider"></span>
+                                        </label>
+                                    </div>
+                                    <div class="quick-btn-row">
+                                        <button class="btn-quick-action btn-water-action" id="btnQuickWater">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+                                            <span id="labelQuickWater">💦 Siram Cepat (5 Detik)</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="auto-metrics-grid">
+                                    <div class="auto-metric-box">
+                                        <span class="auto-metric-lbl">Kelembaban Tanah</span>
+                                        <span class="auto-metric-val" id="autoSoilCurrent">43 %</span>
+                                    </div>
+                                    <div class="auto-metric-box">
+                                        <span class="auto-metric-lbl">Ambang Batas</span>
+                                        <span class="auto-metric-val highlight-warn">35 %</span>
+                                    </div>
+                                    <div class="auto-metric-box">
+                                        <span class="auto-metric-lbl">Status Pompa</span>
+                                        <span class="badge badge-off" id="autoSoilPumpStatus">MATI (OFF)</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- KONTROL LAMPU GROW LIGHT -->
+                            <div class="auto-card" id="cardControlLamp">
+                                <div class="auto-card-header">
+                                    <span class="auto-card-icon">💡</span>
+                                    <div>
+                                        <h3 class="auto-card-title">Kontrol Lampu Grow Light</h3>
+                                        <span class="badge-mode-pill" id="badgeLampMode">Mode: Otomatis</span>
+                                    </div>
+                                </div>
+                                <p class="auto-card-desc">Lampu menyala otomatis saat gelap, atau tekan sakelar manual di bawah.</p>
+
+                                <div class="manual-control-box">
+                                    <div class="manual-switch-row">
+                                        <div class="switch-info">
+                                            <span class="switch-title">Sakelar Manual Lampu</span>
+                                            <span class="switch-sub" id="subTextLamp">Tekan untuk menyalakan/mematikan lampu grow light</span>
+                                        </div>
+                                        <label class="toggle-switch switch-lg">
+                                            <input type="checkbox" id="toggleLampCard" checked>
+                                            <span class="slider"></span>
+                                        </label>
+                                    </div>
+                                    <div class="quick-btn-row">
+                                        <button class="btn-quick-action btn-lamp-action" id="btnToggleLamp">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+                                            <span id="labelToggleLamp">💡 Sakelar Lampu ON / OFF</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="auto-metrics-grid">
+                                    <div class="auto-metric-box">
+                                        <span class="auto-metric-lbl">Sensor Cahaya</span>
+                                        <span class="auto-metric-val highlight-amber" id="autoLightStatus">DAY (SIANG)</span>
+                                    </div>
+                                    <div class="auto-metric-box">
+                                        <span class="auto-metric-lbl">Mode Operasi</span>
+                                        <span class="auto-metric-val">Sensor &amp; Jadwal</span>
+                                    </div>
+                                    <div class="auto-metric-box">
+                                        <span class="auto-metric-lbl">Status Lampu</span>
+                                        <span class="badge badge-on" id="autoLightLampStatus">MENYALA (ON)</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- BOTTOM SECTION: CAMERA MONITOR & RECENT CAPTURES -->
+                <section class="section-grid grid-camera-split" id="sectionCamera">
+                    <!-- CAMERA MONITOR -->
+                    <div class="card camera-panel">
+                        <div class="card-header">
+                            <div>
+                                <h2 class="card-title">Camera Monitor</h2>
+                                <p class="card-subtitle">Pengambilan citra realtime dari ESP32-CAM</p>
+                            </div>
+                            <span class="badge badge-success">LIVE READY</span>
+                        </div>
+
+                        <div class="card-body">
+                            <!-- Camera Preview Viewport -->
+                            <div class="camera-viewport" id="cameraViewport">
+                                <!-- Empty state when no photo -->
+                                <div class="camera-placeholder" id="cameraPlaceholder">
+                                    <svg class="cam-ph-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                    <p class="cam-ph-text">No image captured yet</p>
+                                    <span class="cam-ph-sub">Klik tombol "Capture Image" untuk mengambil gambar tanaman</span>
+                                </div>
+
+                                <!-- Active canvas view when image captured -->
+                                <canvas id="cameraCanvas" width="640" height="380" class="camera-canvas hidden"></canvas>
+
+                                <!-- Loading overlay -->
+                                <div class="camera-loading hidden" id="cameraLoading">
+                                    <div class="spinner"></div>
+                                    <span class="loading-text">Capturing image from ESP32-CAM...</span>
+                                    <span class="loading-sub">Connecting via MQTT command smartfarm/camera/capture</span>
+                                </div>
+                            </div>
+
+                            <!-- Camera Footer & Actions -->
+                            <div class="camera-controls">
+                                <button class="btn btn-primary btn-capture" id="btnCaptureImage">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                                    <span>Capture Image</span>
+                                </button>
+
+                                <div class="camera-meta">
+                                    <div class="meta-item">
+                                        <span class="meta-lbl">Camera:</span>
+                                        <span class="meta-val highlight">ESP32-CAM</span>
+                                    </div>
+                                    <div class="meta-item">
+                                        <span class="meta-lbl">Status:</span>
+                                        <span class="meta-val status-online">READY</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- RECENT CAPTURES -->
+                    <div class="card recent-panel">
+                        <div class="card-header">
+                            <div>
+                                <h2 class="card-title">Recent Captures</h2>
+                                <p class="card-subtitle">Maksimal 3 foto terakhir (browser memory buffer)</p>
+                            </div>
+                            <button class="action-btn-text" id="btnClearRecent" title="Bersihkan galeri memory">
+                                Clear Gallery
+                            </button>
+                        </div>
+
+                        <div class="card-body">
+                            <div class="recent-gallery" id="recentGallery">
+                                <!-- Empty state for gallery -->
+                                <div class="gallery-empty" id="galleryEmpty">
+                                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                                    <p>Belum ada foto tersimpan dalam memory</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <!-- IMAGE PREVIEW MODAL -->
+    <div class="modal-overlay hidden" id="imageModal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modalTitle">Capture Preview</h3>
+                <button class="modal-close" id="modalClose">&times;</button>
+            </div>
+            <div class="modal-body">
+                <img id="modalImage" src="" alt="Captured Plant Preview">
+                <div class="modal-info">
+                    <span id="modalTimestamp">Timestamp: -</span>
+                    <span id="modalMeta">Resolution: 1920x1080 • Camera: ESP32-CAM</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- TOAST NOTIFICATION CONTAINER -->
+    <div class="toast-container" id="toastContainer"></div>
+</body>
+</html>
