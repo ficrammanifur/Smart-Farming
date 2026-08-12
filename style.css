@@ -273,9 +273,38 @@ a {
     border-radius: var(--border-radius-md);
 }
 
+.status-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.status-indicator.online {
+    background-color: var(--accent-green);
+    box-shadow: 0 0 8px var(--accent-green);
+    animation: pulse 2s infinite;
+}
+
+.status-indicator.connecting {
+    background-color: var(--accent-amber);
+    animation: pulse 1s infinite;
+}
+
+.status-indicator.offline {
+    background-color: var(--accent-red);
+}
+
+@keyframes pulse {
+    0% { transform: scale(0.95); opacity: 0.7; }
+    50% { transform: scale(1.2); opacity: 1; }
+    100% { transform: scale(0.95); opacity: 0.7; }
+}
+
 .connection-text {
     display: flex;
     flex-direction: column;
+    min-width: 0;
 }
 
 .connection-title {
@@ -364,6 +393,12 @@ a {
     color: var(--accent-green);
 }
 
+.status-pill.offline {
+    background-color: rgba(239, 68, 68, 0.12);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: var(--accent-red);
+}
+
 .pulse-dot {
     width: 8px;
     height: 8px;
@@ -373,10 +408,9 @@ a {
     animation: pulse 2s infinite;
 }
 
-@keyframes pulse {
-    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-    70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
-    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+.pulse-dot.offline {
+    background-color: var(--accent-red);
+    box-shadow: 0 0 8px var(--accent-red);
 }
 
 .last-update {
@@ -434,17 +468,14 @@ a {
     gap: 1.5rem;
 }
 
-/* Grid Top: 5 Column Status & Sensor Cards */
 .grid-5 {
     grid-template-columns: repeat(5, 1fr);
 }
 
-/* Grid Middle: Environment Monitoring vs Actuators */
 .grid-main-split {
     grid-template-columns: 2.2fr 1fr;
 }
 
-/* Grid Bottom: Camera Monitor vs Recent Captures */
 .grid-camera-split {
     grid-template-columns: 1.6fr 1.4fr;
 }
@@ -477,6 +508,8 @@ a {
     align-items: center;
     justify-content: space-between;
     margin-bottom: 1rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
 }
 
 .card-title {
@@ -525,6 +558,11 @@ a {
     box-shadow: 0 0 12px var(--accent-green);
 }
 
+.status-dot-lg.offline {
+    background-color: var(--accent-red);
+    box-shadow: 0 0 12px var(--accent-red);
+}
+
 .system-status-indicator {
     display: flex;
     align-items: center;
@@ -536,7 +574,6 @@ a {
     font-size: 1.4rem;
     font-weight: 800;
     letter-spacing: 0.02em;
-    color: var(--accent-green);
     font-family: var(--font-mono);
 }
 
@@ -618,6 +655,8 @@ a {
     align-items: center;
     justify-content: space-between;
     font-size: 0.775rem;
+    flex-wrap: wrap;
+    gap: 0.25rem;
 }
 
 .sensor-status-text {
@@ -780,21 +819,6 @@ a {
     display: block;
 }
 
-.chart-tooltip {
-    position: absolute;
-    display: none;
-    pointer-events: none;
-    background: var(--bg-surface);
-    border: 1px solid var(--accent-green);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-    padding: 0.5rem 0.75rem;
-    border-radius: 6px;
-    font-size: 0.75rem;
-    font-family: var(--font-mono);
-    color: var(--text-main);
-    z-index: 10;
-}
-
 /* --------------------------------------------------------------------------
    10. ACTUATOR STATUS PANEL
    -------------------------------------------------------------------------- */
@@ -889,6 +913,12 @@ a {
     color: var(--accent-green);
 }
 
+.actuator-state-control {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
 /* --------------------------------------------------------------------------
    11. AUTOMATION STATUS PANEL
    -------------------------------------------------------------------------- */
@@ -957,7 +987,6 @@ input:checked + .slider:before {
 .switch-badge {
     font-size: 0.75rem;
     font-weight: 700;
-    color: var(--accent-green);
     font-family: var(--font-mono);
     min-width: 28px;
 }
@@ -973,6 +1002,15 @@ input:checked + .slider:before {
     border: 1px solid var(--border-color);
     border-radius: var(--border-radius-md);
     padding: 1.25rem;
+    transition: border-color var(--transition-fast);
+}
+
+.auto-card.device-active-pump {
+    border-color: rgba(56, 189, 248, 0.35) !important;
+}
+
+.auto-card.device-active-lamp {
+    border-color: rgba(245, 158, 11, 0.35) !important;
 }
 
 .auto-card-header {
@@ -1024,12 +1062,6 @@ input:checked + .slider:before {
     font-weight: 700;
     color: var(--text-main);
     font-family: var(--font-mono);
-}
-
-.actuator-state-control {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
 }
 
 .switch-sm {
@@ -1166,14 +1198,6 @@ input:checked + .slider:before {
     border-color: var(--accent-amber) !important;
 }
 
-.device-active-pump {
-    border-color: rgba(56, 189, 248, 0.35) !important;
-}
-
-.device-active-lamp {
-    border-color: rgba(245, 158, 11, 0.35) !important;
-}
-
 /* Toast Notifications */
 .toast-container {
     position: fixed;
@@ -1212,6 +1236,7 @@ input:checked + .slider:before {
 .toast-info { border-left: 4px solid var(--accent-blue); }
 .toast-warning { border-left: 4px solid var(--accent-amber); }
 .toast-success { border-left: 4px solid var(--accent-green); }
+.toast-error { border-left: 4px solid var(--accent-red); }
 
 /* --------------------------------------------------------------------------
    12. CAMERA MONITOR & RECENT CAPTURES
@@ -1316,6 +1341,8 @@ input:checked + .slider:before {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
 }
 
 .btn {
@@ -1342,8 +1369,10 @@ input:checked + .slider:before {
     box-shadow: 0 6px 18px rgba(16, 185, 129, 0.4);
 }
 
-.btn-primary:active {
-    transform: translateY(0);
+.btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
 }
 
 .camera-meta {
@@ -1494,6 +1523,10 @@ input:checked + .slider:before {
     padding: 1.5rem;
 }
 
+.modal-overlay.hidden {
+    display: none;
+}
+
 .modal-card {
     background-color: var(--bg-surface);
     border: 1px solid var(--border-color);
@@ -1556,6 +1589,8 @@ input:checked + .slider:before {
     font-size: 0.775rem;
     color: var(--text-muted);
     font-family: var(--font-mono);
+    flex-wrap: wrap;
+    gap: 0.5rem;
 }
 
 /* --------------------------------------------------------------------------
@@ -1676,5 +1711,9 @@ input:checked + .slider:before {
 
     .camera-meta {
         justify-content: space-between;
+    }
+    
+    .modal-body img {
+        max-height: 250px;
     }
 }
