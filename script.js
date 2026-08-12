@@ -1,89 +1,231 @@
 /* ==========================================================================
-   SMART FARMING IOT DASHBOARD - JAVASCRIPT (VANILLA ES6+)
+   SMART FARMING IOT DASHBOARD - FULL MQTT INTEGRATION
    ========================================================================== */
 
-/**
- * --------------------------------------------------------------------------
- * 1. MOCK DATA STATE
- * --------------------------------------------------------------------------
- * Singleton object holding the telemetry & control state of the Smart Farm.
- * All UI elements read their state from this object.
- */
-const mockData = {
-    temperature: 28.4,
-    humidity: 72,
-    soilMoisture: 43,
-    waterLevel: 78,
-    light: "DAY",
-    pump: false,
-    lamp: true,
-    buzzer: false,
-    system: "ONLINE"
+// ==================== MQTT CONFIGURATION ====================
+const MQTT_CONFIG = {
+    // Untuk HiveMQ Cloud dengan WebSocket Secure
+    broker: 'wss://broker.hivemq.com:8884/mqtt',
+    // Atau jika pakai HiveMQ Cloud berbayar:
+    // broker: 'wss://YOUR_CLUSTER.s1.eu.hivemq.cloud:8884/mqtt',
+    // username: 'YOUR_USERNAME',
+    // password: 'YOUR_PASSWORD',
+    
+    topics: {
+        // Sensor Topics
+        temperature: 'smartfarm/sensor/temperature',
+        humidity: 'smartfarm/sensor/humidity',
+        soilMoisture: 'smartfarm/sensor/soil_moisture',
+        waterLevel: 'smartfarm/sensor/water_level',
+        light: 'smartfarm/sensor/light',
+        
+        // Actuator Topics
+        pump: 'smartfarm/actuator/pump',
+        lamp: 'smartfarm/actuator/lamp',
+        buzzer: 'smartfarm/actuator/buzzer',
+        
+        // Control Topics
+        controlPump: 'smartfarm/control/pump',
+        controlLamp: 'smartfarm/control/lamp',
+        controlBuzzer: 'smartfarm/control/buzzer',
+        controlAuto: 'smartfarm/control/auto_mode',
+        
+        // Status Topic
+        status: 'smartfarm/status/esp32',
+        cameraCapture: 'smartfarm/camera/capture'
+    }
 };
 
-/**
- * --------------------------------------------------------------------------
- * 2. CAMERA GALLERY MEMORY BUFFER (MAX 3 PHOTOS)
- * --------------------------------------------------------------------------
- * In-memory FIFO array to hold up to 3 recent captured photos.
- * Cleared on page refresh as per specification.
- */
+// ==================== STATE ====================
+const state = {
+    // Sensor Data
+    temperature: null,
+    humidity: null,
+    soilMoisture: null,
+    waterLevel: null,
+    light: '--',
+    
+    // Actuator States
+    pump: false,
+    lamp: false,
+    buzzer: false,
+    
+    // System
+    systemStatus: 'OFFLINE',
+    autoMode: true,
+    uptime: 0,
+    waterUsed: 0,
+    
+    // MQTT
+    connected: false,
+    lastUpdate: null,
+    messageCount: 0,
+    
+    // Chart History
+    chartLabels: [],
+    chartTempData: [],
+    chartSoilData: [],
+    maxChartPoints: 20
+};
+
+// ==================== DOM REFERENCES ====================
+const DOM = {
+    // System Status
+    sysStatusDot: document.getElementById('sysStatusDot'),
+    sysStatusText: document.getElementById('sysStatusText'),
+    sysStatusSub: document.getElementById('sysStatusSub'),
+    sysStatusBadge: document.getElementById('sysStatusBadge'),
+    sysStatusTime: document.getElementById('sysStatusTime'),
+    headerSystemStatus: document.getElementById('headerSystemStatus'),
+    headerStatusDot: document.getElementById('headerStatusDot'),
+    headerStatusPill: document.getElementById('headerStatusPill'),
+    lastUpdateTime: document.getElementById('lastUpdateTime'),
+    
+    // Sidebar
+    sidebarStatusDot: document.getElementById('sidebarStatusDot'),
+    sidebarStatusTitle: document.getElementById('sidebarStatusTitle'),
+    sidebarStatusSub: document.getElementById('sidebarStatusSub'),
+    
+    // Sensor Cards
+    valTemperature: document.getElementById('valTemperature'),
+    statusTemperature: document.getElementById('statusTemperature'),
+    tempTrendText: document.getElementById('tempTrendText'),
+    
+    valHumidity: document.getElementById('valHumidity'),
+    statusHumidity: document.getElementById('statusHumidity'),
+    humidityTrendText: document.getElementById('humidityTrendText'),
+    
+    valSoilMoisture: document.getElementById('valSoilMoisture'),
+    barSoilMoisture: document.getElementById('barSoilMoisture'),
+    statusSoilMoisture: document.getElementById('statusSoilMoisture'),
+    
+    valWaterLevel: document.getElementById('valWaterLevel'),
+    barWaterLevel: document.getElementById('barWaterLevel'),
+    statusWaterLevel: document.getElementById('statusWaterLevel'),
+    
+    // Environment Summary
+    envTemp: document.getElementById('envTemp'),
+    envHumidity: document.getElementById('envHumidity'),
+    envLight: document.getElementById('envLight'),
+    envSoil: document.getElementById('envSoil'),
+    envWater: document.getElementById('envWater'),
+    
+    // Actuators
+    statePump: document.getElementById('statePump'),
+    stateLamp: document.getElementById('stateLamp'),
+    stateBuzzer: document.getElementById('stateBuzzer'),
+    stateSystem: document.getElementById('stateSystem'),
+    dotSystem: document.getElementById('dotSystem'),
+    systemMCUStatus: document.getElementById('systemMCUStatus'),
+    
+    togglePumpManual: document.getElementById('togglePumpManual'),
+    toggleLampManual: document.getElementById('toggleLampManual'),
+    toggleBuzzerManual: document.getElementById('toggleBuzzerManual'),
+    togglePumpCard: document.getElementById('togglePumpCard'),
+    toggleLampCard: document.getElementById('toggleLampCard'),
+    
+    modeTextPump: document.getElementById('modeTextPump'),
+    modeTextLamp: document.getElementById('modeTextLamp'),
+    modeTextBuzzer: document.getElementById('modeTextBuzzer'),
+    
+    iconBoxPump: document.getElementById('iconBoxPump'),
+    iconBoxLamp: document.getElementById('iconBoxLamp'),
+    iconBoxBuzzer: document.getElementById('iconBoxBuzzer'),
+    
+    // Automation Panel
+    toggleGlobalAuto: document.getElementById('toggleGlobalAuto'),
+    badgeGlobalAuto: document.getElementById('badgeGlobalAuto'),
+    badgePumpMode: document.getElementById('badgePumpMode'),
+    badgeLampMode: document.getElementById('badgeLampMode'),
+    autoSoilCurrent: document.getElementById('autoSoilCurrent'),
+    autoSoilPumpStatus: document.getElementById('autoSoilPumpStatus'),
+    autoLightStatus: document.getElementById('autoLightStatus'),
+    autoLightLampStatus: document.getElementById('autoLightLampStatus'),
+    cardControlPump: document.getElementById('cardControlPump'),
+    cardControlLamp: document.getElementById('cardControlLamp'),
+    
+    // Quick Actions
+    btnQuickWater: document.getElementById('btnQuickWater'),
+    labelQuickWater: document.getElementById('labelQuickWater'),
+    btnToggleLamp: document.getElementById('btnToggleLamp'),
+    labelToggleLamp: document.getElementById('labelToggleLamp'),
+    
+    // Camera
+    btnCaptureImage: document.getElementById('btnCaptureImage'),
+    cameraCanvas: document.getElementById('cameraCanvas'),
+    cameraPlaceholder: document.getElementById('cameraPlaceholder'),
+    cameraLoading: document.getElementById('cameraLoading'),
+    recentGallery: document.getElementById('recentGallery'),
+    galleryEmpty: document.getElementById('galleryEmpty'),
+    btnClearRecent: document.getElementById('btnClearRecent'),
+    cameraStatusBadge: document.getElementById('cameraStatusBadge'),
+    cameraMetaStatus: document.getElementById('cameraMetaStatus'),
+    
+    // Modal
+    imageModal: document.getElementById('imageModal'),
+    modalImage: document.getElementById('modalImage'),
+    modalTimestamp: document.getElementById('modalTimestamp'),
+    modalMeta: document.getElementById('modalMeta'),
+    modalClose: document.getElementById('modalClose'),
+    
+    // Toast
+    toastContainer: document.getElementById('toastContainer'),
+    
+    // Buttons
+    btnReconnectMQTT: document.getElementById('btnReconnectMQTT')
+};
+
+// ==================== MQTT CLIENT ====================
+let mqttClient = null;
+let quickWaterTimer = null;
+let chartInstance = null;
 let recentCaptures = [];
 
-/**
- * --------------------------------------------------------------------------
- * 3. CHART DUMMY HISTORY DATA (15 TIMEPINTS)
- * --------------------------------------------------------------------------
- */
-const chartHistory = {
-    labels: ["01:30", "01:31", "01:32", "01:33", "01:34", "01:35", "01:36", "01:37", "01:38", "01:39", "01:40", "01:41", "01:42", "01:43", "01:44"],
-    tempData: [27.2, 27.5, 27.8, 28.0, 28.1, 28.3, 28.2, 28.4, 28.5, 28.3, 28.4, 28.6, 28.4, 28.5, 28.4],
-    soilData: [48, 47, 46, 45, 45, 44, 44, 43, 43, 42, 43, 43, 44, 43, 43]
-};
-
-let currentChartTab = 'temp'; // 'temp' or 'soil'
-
-/* ==========================================================================
-   4. DOM CONTENT LOADED INITIALIZATION
-   ========================================================================== */
-document.addEventListener("DOMContentLoaded", () => {
+// ==================== INIT ====================
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('🌱 Smart Farming Dashboard v2.0');
+    console.log('📡 MQTT Broker:', MQTT_CONFIG.broker);
+    console.log('📋 Topics:', MQTT_CONFIG.topics);
+    
     initNavigation();
-    initUIFromMockData();
     initChart();
-    initCameraModule();
-    initSimulationControls();
+    initMQTT();
     initManualControls();
+    initCameraModule();
+    initReconnectButton();
+    updateLastTimestamp();
+    
+    // Set default mode
+    DOM.toggleGlobalAuto.checked = true;
+    state.autoMode = true;
 });
 
-/* ==========================================================================
-   5. NAVIGATION & SIDEBAR CONTROLS
-   ========================================================================== */
+// ==================== NAVIGATION ====================
 function initNavigation() {
-    const sidebar = document.getElementById("sidebar");
-    const overlay = document.getElementById("sidebarOverlay");
-    const toggleBtn = document.getElementById("mobileToggleBtn");
-    const closeBtn = document.getElementById("mobileCloseBtn");
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebarOverlay');
+    const toggleBtn = document.getElementById('mobileToggleBtn');
+    const closeBtn = document.getElementById('mobileCloseBtn');
 
     function openSidebar() {
-        sidebar.classList.add("open");
-        overlay.classList.add("active");
+        sidebar.classList.add('open');
+        overlay.classList.add('active');
     }
 
     function closeSidebar() {
-        sidebar.classList.remove("open");
-        overlay.classList.remove("active");
+        sidebar.classList.remove('open');
+        overlay.classList.remove('active');
     }
 
-    if (toggleBtn) toggleBtn.addEventListener("click", openSidebar);
-    if (closeBtn) closeBtn.addEventListener("click", closeSidebar);
-    if (overlay) overlay.addEventListener("click", closeSidebar);
+    if (toggleBtn) toggleBtn.addEventListener('click', openSidebar);
+    if (closeBtn) closeBtn.addEventListener('click', closeSidebar);
+    if (overlay) overlay.addEventListener('click', closeSidebar);
 
-    // Nav Item Click Active state
-    const navItems = document.querySelectorAll(".nav-item");
+    const navItems = document.querySelectorAll('.nav-item');
     navItems.forEach(item => {
-        item.addEventListener("click", (e) => {
-            navItems.forEach(n => n.classList.remove("active"));
-            item.classList.add("active");
+        item.addEventListener('click', () => {
+            navItems.forEach(n => n.classList.remove('active'));
+            item.classList.add('active');
             if (window.innerWidth <= 992) {
                 closeSidebar();
             }
@@ -91,595 +233,788 @@ function initNavigation() {
     });
 }
 
-/* ==========================================================================
-   6. FUTURE MQTT INTEGRATION PREPARATION FUNCTIONS
-   ==========================================================================
-   These functions serve as the direct decoupled API layer between incoming
-   MQTT topic payloads and the DOM presentation layer.
-   When HiveMQ WSS is implemented, incoming messages will simply invoke these!
-   ========================================================================== */
+// ==================== MQTT ====================
+function initMQTT() {
+    try {
+        const clientId = 'dashboard_' + Math.random().toString(16).substr(2, 8);
+        
+        // Build connection options
+        const options = {
+            clientId: clientId,
+            clean: true,
+            reconnectPeriod: 3000,
+            keepAlive: 60
+        };
+        
+        // Add credentials if provided
+        if (MQTT_CONFIG.username && MQTT_CONFIG.password) {
+            options.username = MQTT_CONFIG.username;
+            options.password = MQTT_CONFIG.password;
+        }
+        
+        mqttClient = mqtt.connect(MQTT_CONFIG.broker, options);
+        
+        mqttClient.on('connect', () => {
+            console.log('✅ MQTT Connected');
+            state.connected = true;
+            updateConnectionUI('connected', 'MQTT Connected', 'Online');
+            showToast('MQTT Connected successfully!', 'success');
+            
+            // Subscribe to all topics
+            const topics = Object.values(MQTT_CONFIG.topics);
+            topics.forEach(topic => {
+                mqttClient.subscribe(topic, { qos: 1 }, (err) => {
+                    if (!err) {
+                        console.log('✅ Subscribed to:', topic);
+                    } else {
+                        console.error('❌ Subscribe error:', topic, err);
+                    }
+                });
+            });
+            
+            // Request status update
+            setTimeout(() => {
+                showToast('📡 Waiting for sensor data...', 'info');
+            }, 1000);
+        });
 
-/**
- * Update Sensor Data UI from telemetry object
- * @param {Object} data - { temperature, humidity, soilMoisture, waterLevel, light }
- */
-function updateSensorData(data) {
-    if (!data) return;
+        mqttClient.on('message', (topic, message) => {
+            const payload = message.toString();
+            console.log('📥', topic, '->', payload);
+            handleMQTTMessage(topic, payload);
+        });
 
-    if (data.temperature !== undefined) mockData.temperature = data.temperature;
-    if (data.humidity !== undefined) mockData.humidity = data.humidity;
-    if (data.soilMoisture !== undefined) mockData.soilMoisture = data.soilMoisture;
-    if (data.waterLevel !== undefined) mockData.waterLevel = data.waterLevel;
-    if (data.light !== undefined) mockData.light = data.light;
+        mqttClient.on('error', (err) => {
+            console.error('❌ MQTT Error:', err);
+            state.connected = false;
+            updateConnectionUI('disconnected', 'MQTT Error', 'Offline');
+            showToast('MQTT Error: ' + err.message, 'warning');
+        });
 
-    // Render updated sensors to DOM
+        mqttClient.on('offline', () => {
+            console.log('⚠️ MQTT Offline');
+            state.connected = false;
+            updateConnectionUI('disconnected', 'MQTT Offline', 'Offline');
+        });
+
+        mqttClient.on('reconnect', () => {
+            console.log('🔄 MQTT Reconnecting...');
+            updateConnectionUI('connecting', 'Reconnecting...', 'Connecting');
+        });
+
+    } catch (e) {
+        console.error('❌ MQTT Init error:', e);
+        showToast('MQTT Init error: ' + e.message, 'error');
+    }
+}
+
+function handleMQTTMessage(topic, payload) {
+    const topics = MQTT_CONFIG.topics;
+    
+    // Update last update time
+    state.lastUpdate = new Date();
+    updateLastTimestamp();
+    state.messageCount++;
+    
+    // Parse JSON for status topic
+    if (topic === topics.status) {
+        try {
+            const data = JSON.parse(payload);
+            console.log('📊 Status JSON:', data);
+            
+            // Update state from JSON
+            if (data.temperature !== undefined) state.temperature = data.temperature;
+            if (data.humidity !== undefined) state.humidity = data.humidity;
+            if (data.soil_moisture !== undefined) state.soilMoisture = data.soil_moisture;
+            if (data.water_level !== undefined) state.waterLevel = data.water_level;
+            if (data.light !== undefined) state.light = data.light;
+            if (data.pump !== undefined) state.pump = data.pump === 'ON';
+            if (data.lamp !== undefined) state.lamp = data.lamp === 'ON';
+            if (data.buzzer !== undefined) state.buzzer = data.buzzer === 'ON';
+            if (data.mode !== undefined) state.autoMode = data.mode === 'AUTO';
+            if (data.status !== undefined) state.systemStatus = data.status;
+            if (data.uptime !== undefined) state.uptime = data.uptime;
+            if (data.water_used !== undefined) state.waterUsed = data.water_used;
+            
+            // Update UI
+            renderAll();
+            return;
+        } catch (e) {
+            console.warn('⚠️ Failed to parse status JSON:', e);
+        }
+    }
+    
+    // Handle individual sensor topics
+    if (topic === topics.temperature) {
+        state.temperature = parseFloat(payload);
+        updateChartData(state.temperature, null);
+    }
+    else if (topic === topics.humidity) {
+        state.humidity = parseFloat(payload);
+    }
+    else if (topic === topics.soilMoisture) {
+        state.soilMoisture = parseInt(payload);
+        updateChartData(null, state.soilMoisture);
+    }
+    else if (topic === topics.waterLevel) {
+        state.waterLevel = parseInt(payload);
+    }
+    else if (topic === topics.light) {
+        state.light = payload;
+    }
+    else if (topic === topics.pump) {
+        state.pump = payload === 'ON';
+        syncPumpToggle();
+    }
+    else if (topic === topics.lamp) {
+        state.lamp = payload === 'ON';
+        syncLampToggle();
+    }
+    else if (topic === topics.buzzer) {
+        state.buzzer = payload === 'ON';
+    }
+    
+    // Render UI
+    renderAll();
+}
+
+function publishControl(topic, value) {
+    if (!state.connected || !mqttClient) {
+        showToast('MQTT not connected!', 'warning');
+        return false;
+    }
+    
+    try {
+        mqttClient.publish(topic, value, { qos: 1 });
+        console.log('📤', topic, '->', value);
+        return true;
+    } catch (e) {
+        console.error('❌ Publish error:', e);
+        showToast('Failed to publish: ' + e.message, 'error');
+        return false;
+    }
+}
+
+// ==================== UI UPDATE FUNCTIONS ====================
+function renderAll() {
+    renderSystemStatus();
     renderSensorCards();
     renderEnvironmentSummary();
-    updateLastTimestamp();
-}
-
-/**
- * Update Actuator Status UI from actuator state object
- * @param {Object} data - { pump, lamp, buzzer }
- */
-function updateActuatorStatus(data) {
-    if (!data) return;
-
-    if (data.pump !== undefined) mockData.pump = data.pump;
-    if (data.lamp !== undefined) mockData.lamp = data.lamp;
-    if (data.buzzer !== undefined) mockData.buzzer = data.buzzer;
-
     renderActuators();
     renderAutomationPanel();
-    updateLastTimestamp();
 }
 
-/**
- * Update System Status UI
- * @param {string} status - "ONLINE" | "OFFLINE" | "WARNING"
- */
-function updateSystemStatus(status) {
-    if (!status) return;
-    mockData.system = status;
-    renderSystemStatus();
-}
-
-/**
- * Handle incoming camera capture trigger command from MQTT or local UI
- */
-function handleCameraCommand() {
-    captureImage();
-}
-
-/* ==========================================================================
-   7. UI PRESENTATION RENDERERS (READ FROM MOCKDATA)
-   ========================================================================== */
-
-/**
- * Populate all UI components initially from mockData
- */
-function initUIFromMockData() {
-    renderSystemStatus();
-    renderSensorCards();
-    renderEnvironmentSummary();
-    renderActuators();
-    renderAutomationPanel();
-    updateLastTimestamp();
+function updateConnectionUI(status, title, sub) {
+    const dot = DOM.sidebarStatusDot;
+    const titleEl = DOM.sidebarStatusTitle;
+    const subEl = DOM.sidebarStatusSub;
+    
+    if (dot) {
+        dot.className = 'status-indicator ' + 
+            (status === 'connected' ? 'online' : 
+             status === 'connecting' ? 'connecting' : 'offline');
+    }
+    if (titleEl) titleEl.textContent = title;
+    if (subEl) subEl.textContent = sub;
 }
 
 function renderSystemStatus() {
-    const sysDot = document.getElementById("sysStatusDot");
-    const sysText = document.getElementById("sysStatusText");
-    const headerStatus = document.getElementById("headerSystemStatus");
-    const sysBadge = document.getElementById("sysStatusBadge");
-    const sysSub = document.getElementById("sysStatusSub");
-
-    const isOnline = mockData.system === "ONLINE";
-
-    if (sysDot) sysDot.className = `status-dot-lg ${isOnline ? "online" : "offline"}`;
-    if (sysText) {
-        sysText.textContent = mockData.system;
-        sysText.style.color = isOnline ? "var(--accent-green)" : "var(--accent-red)";
+    const isOnline = state.systemStatus === 'ONLINE' || state.systemStatus === 'NORMAL';
+    
+    // System Status Card
+    if (DOM.sysStatusDot) {
+        DOM.sysStatusDot.className = `status-dot-lg ${isOnline ? 'online' : 'offline'}`;
     }
-    if (headerStatus) headerStatus.textContent = `SYSTEM ${mockData.system}`;
-    if (sysBadge) {
-        sysBadge.textContent = isOnline ? "NORMAL" : "ALERT";
-        sysBadge.className = `badge ${isOnline ? "badge-success" : "badge-off"}`;
+    if (DOM.sysStatusText) {
+        DOM.sysStatusText.textContent = isOnline ? 'ONLINE' : 'OFFLINE';
+        DOM.sysStatusText.style.color = isOnline ? 'var(--accent-green)' : 'var(--accent-red)';
     }
-    if (sysSub) {
-        sysSub.textContent = isOnline ? "All systems operating normally" : "Connection lost with MCU";
+    if (DOM.sysStatusSub) {
+        DOM.sysStatusSub.textContent = isOnline ? 'All systems operating normally' : 'Connection lost with MCU';
+    }
+    if (DOM.sysStatusBadge) {
+        DOM.sysStatusBadge.textContent = isOnline ? 'NORMAL' : 'ALERT';
+        DOM.sysStatusBadge.className = `badge ${isOnline ? 'badge-success' : 'badge-off'}`;
+    }
+    
+    // Header Status
+    if (DOM.headerSystemStatus) {
+        DOM.headerSystemStatus.textContent = `SYSTEM ${isOnline ? 'ONLINE' : 'OFFLINE'}`;
+    }
+    if (DOM.headerStatusPill) {
+        DOM.headerStatusPill.className = `status-pill ${isOnline ? 'online' : 'offline'}`;
+    }
+    
+    // Dot System
+    if (DOM.dotSystem) {
+        DOM.dotSystem.className = `state-dot ${isOnline ? 'on' : 'off'}`;
+    }
+    if (DOM.stateSystem) {
+        DOM.stateSystem.textContent = isOnline ? 'NORMAL' : 'OFFLINE';
+        DOM.stateSystem.className = `state-text ${isOnline ? 'active' : ''}`;
+    }
+    if (DOM.systemMCUStatus) {
+        DOM.systemMCUStatus.textContent = isOnline ? 'ESP32 Status OK' : 'ESP32 Offline';
     }
 }
 
 function renderSensorCards() {
-    // 1. Temperature Card
-    const elTemp = document.getElementById("valTemperature");
-    const stTemp = document.getElementById("statusTemperature");
-    if (elTemp) elTemp.textContent = mockData.temperature.toFixed(1);
-    if (stTemp) {
-        if (mockData.temperature > 32) {
-            stTemp.textContent = "High Temp";
-            stTemp.className = "badge badge-off";
-            stTemp.style.borderColor = "var(--accent-amber)";
-            stTemp.style.color = "var(--accent-amber)";
+    // Temperature
+    if (DOM.valTemperature) {
+        DOM.valTemperature.textContent = state.temperature !== null ? state.temperature.toFixed(1) : '--';
+    }
+    if (DOM.statusTemperature) {
+        const temp = state.temperature;
+        if (temp === null) {
+            DOM.statusTemperature.textContent = '--';
+            DOM.statusTemperature.className = 'badge badge-off';
+        } else if (temp > 32) {
+            DOM.statusTemperature.textContent = 'High Temp';
+            DOM.statusTemperature.className = 'badge badge-off';
+            DOM.statusTemperature.style.borderColor = 'var(--accent-amber)';
+            DOM.statusTemperature.style.color = 'var(--accent-amber)';
+        } else if (temp < 20) {
+            DOM.statusTemperature.textContent = 'Low Temp';
+            DOM.statusTemperature.className = 'badge badge-off';
+            DOM.statusTemperature.style.borderColor = 'var(--accent-blue)';
+            DOM.statusTemperature.style.color = 'var(--accent-blue)';
         } else {
-            stTemp.textContent = "Normal";
-            stTemp.className = "badge badge-outline-success";
+            DOM.statusTemperature.textContent = 'Normal';
+            DOM.statusTemperature.className = 'badge badge-outline-success';
+            DOM.statusTemperature.style.borderColor = '';
+            DOM.statusTemperature.style.color = '';
         }
     }
-
-    // 2. Humidity Card
-    const elHum = document.getElementById("valHumidity");
-    if (elHum) elHum.textContent = Math.round(mockData.humidity);
-
-    // 3. Soil Moisture Card
-    const elSoil = document.getElementById("valSoilMoisture");
-    const barSoil = document.getElementById("barSoilMoisture");
-    const stSoil = document.getElementById("statusSoilMoisture");
-    if (elSoil) elSoil.textContent = Math.round(mockData.soilMoisture);
-    if (barSoil) barSoil.style.width = `${Math.min(100, Math.max(0, mockData.soilMoisture))}%`;
-    if (stSoil) {
-        const soilVal = mockData.soilMoisture;
-        if (soilVal < 30) {
-            stSoil.textContent = "Moisture Level: Dry (Watering Needed)";
-            stSoil.style.color = "var(--accent-amber)";
-        } else if (soilVal > 80) {
-            stSoil.textContent = "Moisture Level: Wet";
-            stSoil.style.color = "var(--accent-blue)";
+    
+    // Humidity
+    if (DOM.valHumidity) {
+        DOM.valHumidity.textContent = state.humidity !== null ? Math.round(state.humidity) : '--';
+    }
+    
+    // Soil Moisture
+    if (DOM.valSoilMoisture) {
+        DOM.valSoilMoisture.textContent = state.soilMoisture !== null ? Math.round(state.soilMoisture) : '--';
+    }
+    if (DOM.barSoilMoisture) {
+        const val = state.soilMoisture !== null ? Math.min(100, Math.max(0, state.soilMoisture)) : 0;
+        DOM.barSoilMoisture.style.width = `${val}%`;
+    }
+    if (DOM.statusSoilMoisture) {
+        const val = state.soilMoisture;
+        if (val === null) {
+            DOM.statusSoilMoisture.textContent = '--';
+        } else if (val < 30) {
+            DOM.statusSoilMoisture.textContent = 'Moisture Level: Dry (Watering Needed)';
+            DOM.statusSoilMoisture.style.color = 'var(--accent-amber)';
+        } else if (val > 80) {
+            DOM.statusSoilMoisture.textContent = 'Moisture Level: Wet';
+            DOM.statusSoilMoisture.style.color = 'var(--accent-blue)';
         } else {
-            stSoil.textContent = "Moisture Level: Good";
-            stSoil.style.color = "var(--text-muted)";
+            DOM.statusSoilMoisture.textContent = 'Moisture Level: Good';
+            DOM.statusSoilMoisture.style.color = 'var(--text-muted)';
         }
     }
-
-    // 4. Water Tank Card
-    const elWater = document.getElementById("valWaterLevel");
-    const barWater = document.getElementById("barWaterLevel");
-    const stWater = document.getElementById("statusWaterLevel");
-    if (elWater) elWater.textContent = Math.round(mockData.waterLevel);
-    if (barWater) barWater.style.width = `${Math.min(100, Math.max(0, mockData.waterLevel))}%`;
-    if (stWater) {
-        const wVal = mockData.waterLevel;
-        if (wVal < 20) {
-            stWater.textContent = "Water Level: Low Alert!";
-            stWater.style.color = "var(--accent-red)";
+    
+    // Water Level
+    if (DOM.valWaterLevel) {
+        DOM.valWaterLevel.textContent = state.waterLevel !== null ? Math.round(state.waterLevel) : '--';
+    }
+    if (DOM.barWaterLevel) {
+        const val = state.waterLevel !== null ? Math.min(100, Math.max(0, state.waterLevel)) : 0;
+        DOM.barWaterLevel.style.width = `${val}%`;
+    }
+    if (DOM.statusWaterLevel) {
+        const val = state.waterLevel;
+        if (val === null) {
+            DOM.statusWaterLevel.textContent = '--';
+        } else if (val < 20) {
+            DOM.statusWaterLevel.textContent = 'Water Level: Low Alert!';
+            DOM.statusWaterLevel.style.color = 'var(--accent-red)';
         } else {
-            stWater.textContent = "Water Level: Good";
-            stWater.style.color = "var(--text-muted)";
+            DOM.statusWaterLevel.textContent = 'Water Level: Good';
+            DOM.statusWaterLevel.style.color = 'var(--text-muted)';
         }
     }
 }
 
 function renderEnvironmentSummary() {
-    const eTemp = document.getElementById("envTemp");
-    const eHum = document.getElementById("envHumidity");
-    const eLight = document.getElementById("envLight");
-    const eSoil = document.getElementById("envSoil");
-    const eWater = document.getElementById("envWater");
-
-    if (eTemp) eTemp.textContent = `${mockData.temperature.toFixed(1)} °C`;
-    if (eHum) eHum.textContent = `${Math.round(mockData.humidity)} %`;
-    if (eLight) eLight.textContent = mockData.light;
-    if (eSoil) eSoil.textContent = `${Math.round(mockData.soilMoisture)} %`;
-    if (eWater) eWater.textContent = `${Math.round(mockData.waterLevel)} %`;
+    if (DOM.envTemp) {
+        DOM.envTemp.textContent = state.temperature !== null ? `${state.temperature.toFixed(1)} °C` : '-- °C';
+    }
+    if (DOM.envHumidity) {
+        DOM.envHumidity.textContent = state.humidity !== null ? `${Math.round(state.humidity)} %` : '-- %';
+    }
+    if (DOM.envLight) {
+        DOM.envLight.textContent = state.light || '--';
+    }
+    if (DOM.envSoil) {
+        DOM.envSoil.textContent = state.soilMoisture !== null ? `${Math.round(state.soilMoisture)} %` : '-- %';
+    }
+    if (DOM.envWater) {
+        DOM.envWater.textContent = state.waterLevel !== null ? `${Math.round(state.waterLevel)} %` : '-- %';
+    }
 }
 
 function renderActuators() {
-    // Water Pump
-    const statePump = document.getElementById("statePump");
-    const togglePumpManual = document.getElementById("togglePumpManual");
-    const togglePumpCard = document.getElementById("togglePumpCard");
-    const iconBoxPump = document.getElementById("iconBoxPump");
-    const modeTextPump = document.getElementById("modeTextPump");
-
-    if (statePump) {
-        statePump.textContent = mockData.pump ? "MENYALA" : "MATI";
-        statePump.className = mockData.pump ? "state-text active" : "state-text";
+    // Pump
+    if (DOM.statePump) {
+        DOM.statePump.textContent = state.pump ? 'MENYALA' : 'MATI';
+        DOM.statePump.className = state.pump ? 'state-text active' : 'state-text';
     }
-    if (togglePumpManual) togglePumpManual.checked = mockData.pump;
-    if (togglePumpCard) togglePumpCard.checked = mockData.pump;
-    if (iconBoxPump) {
-        if (mockData.pump) {
-            iconBoxPump.classList.add("active-glow");
-        } else {
-            iconBoxPump.classList.remove("active-glow");
-        }
+    syncPumpToggle();
+    
+    if (DOM.iconBoxPump) {
+        DOM.iconBoxPump.classList.toggle('active-glow', state.pump);
     }
-    if (modeTextPump) {
-        modeTextPump.textContent = mockData.pumpMode === "MANUAL" ? "Mode: Manual (Pengguna)" : "Mode: Otomatis (Sensor)";
+    if (DOM.modeTextPump) {
+        DOM.modeTextPump.textContent = state.autoMode ? 'Mode: Otomatis' : 'Mode: Manual (Pengguna)';
     }
-
-    // Grow Lamp
-    const stateLamp = document.getElementById("stateLamp");
-    const toggleLampManual = document.getElementById("toggleLampManual");
-    const toggleLampCard = document.getElementById("toggleLampCard");
-    const iconBoxLamp = document.getElementById("iconBoxLamp");
-    const modeTextLamp = document.getElementById("modeTextLamp");
-
-    if (stateLamp) {
-        stateLamp.textContent = mockData.lamp ? "MENYALA" : "MATI";
-        stateLamp.className = mockData.lamp ? "state-text active" : "state-text";
+    
+    // Lamp
+    if (DOM.stateLamp) {
+        DOM.stateLamp.textContent = state.lamp ? 'MENYALA' : 'MATI';
+        DOM.stateLamp.className = state.lamp ? 'state-text active' : 'state-text';
     }
-    if (toggleLampManual) toggleLampManual.checked = mockData.lamp;
-    if (toggleLampCard) toggleLampCard.checked = mockData.lamp;
-    if (iconBoxLamp) {
-        if (mockData.lamp) {
-            iconBoxLamp.classList.add("active-glow-amber");
-        } else {
-            iconBoxLamp.classList.remove("active-glow-amber");
-        }
+    syncLampToggle();
+    
+    if (DOM.iconBoxLamp) {
+        DOM.iconBoxLamp.classList.toggle('active-glow-amber', state.lamp);
     }
-    if (modeTextLamp) {
-        modeTextLamp.textContent = mockData.lampMode === "MANUAL" ? "Mode: Manual (Pengguna)" : "Mode: Otomatis (Sensor)";
+    if (DOM.modeTextLamp) {
+        DOM.modeTextLamp.textContent = state.autoMode ? 'Mode: Otomatis' : 'Mode: Manual (Pengguna)';
     }
-
+    
     // Buzzer
-    const stateBuzzer = document.getElementById("stateBuzzer");
-    const toggleBuzzerManual = document.getElementById("toggleBuzzerManual");
-    if (stateBuzzer) {
-        stateBuzzer.textContent = mockData.buzzer ? "MENYALA" : "MATI";
-        stateBuzzer.className = mockData.buzzer ? "state-text active" : "state-text";
+    if (DOM.stateBuzzer) {
+        DOM.stateBuzzer.textContent = state.buzzer ? 'MENYALA' : 'MATI';
+        DOM.stateBuzzer.className = state.buzzer ? 'state-text active' : 'state-text';
     }
-    if (toggleBuzzerManual) toggleBuzzerManual.checked = mockData.buzzer;
+    if (DOM.toggleBuzzerManual) {
+        DOM.toggleBuzzerManual.checked = state.buzzer;
+    }
+    if (DOM.iconBoxBuzzer) {
+        DOM.iconBoxBuzzer.classList.toggle('active-glow', state.buzzer);
+    }
 }
 
 function renderAutomationPanel() {
-    const aSoilCurrent = document.getElementById("autoSoilCurrent");
-    const aSoilPump = document.getElementById("autoSoilPumpStatus");
-    const aLightStatus = document.getElementById("autoLightStatus");
-    const aLightLamp = document.getElementById("autoLightLampStatus");
-    const badgePumpMode = document.getElementById("badgePumpMode");
-    const badgeLampMode = document.getElementById("badgeLampMode");
-    const cardPump = document.getElementById("cardControlPump");
-    const cardLamp = document.getElementById("cardControlLamp");
-
-    if (aSoilCurrent) aSoilCurrent.textContent = `${Math.round(mockData.soilMoisture)} %`;
-    if (aSoilPump) {
-        aSoilPump.textContent = mockData.pump ? "MENYALA (ON)" : "MATI (OFF)";
-        aSoilPump.className = `badge ${mockData.pump ? "badge-on" : "badge-off"}`;
+    // Auto Mode
+    if (DOM.toggleGlobalAuto) {
+        DOM.toggleGlobalAuto.checked = state.autoMode;
     }
-
-    if (badgePumpMode) {
-        const isManual = mockData.pumpMode === "MANUAL";
-        badgePumpMode.textContent = isManual ? "Mode: Manual (User Override)" : "Mode: Otomatis";
-        badgePumpMode.className = `badge-mode-pill ${isManual ? "manual" : "auto"}`;
+    if (DOM.badgeGlobalAuto) {
+        DOM.badgeGlobalAuto.textContent = state.autoMode ? 'AKTIF' : 'NONAKTIF';
+        DOM.badgeGlobalAuto.style.color = state.autoMode ? 'var(--accent-green)' : 'var(--text-muted)';
     }
-
-    if (cardPump) {
-        if (mockData.pump) cardPump.classList.add("device-active-pump");
-        else cardPump.classList.remove("device-active-pump");
-    }
-
-    if (aLightStatus) aLightStatus.textContent = mockData.light;
-    if (aLightLamp) {
-        aLightLamp.textContent = mockData.lamp ? "MENYALA (ON)" : "MATI (OFF)";
-        aLightLamp.className = `badge ${mockData.lamp ? "badge-on" : "badge-off"}`;
-    }
-
-    if (badgeLampMode) {
-        const isManual = mockData.lampMode === "MANUAL";
-        badgeLampMode.textContent = isManual ? "Mode: Manual (User Override)" : "Mode: Otomatis";
-        badgeLampMode.className = `badge-mode-pill ${isManual ? "manual" : "auto"}`;
-    }
-
-    if (cardLamp) {
-        if (mockData.lamp) cardLamp.classList.add("device-active-lamp");
-        else cardLamp.classList.remove("device-active-lamp");
-    }
-}
-
-/**
- * Update state Pompa Air secara terpusat
- */
-function setPumpState(newState, mode = null, triggerToast = true) {
-    mockData.pump = newState;
-    if (mode) mockData.pumpMode = mode;
-
-    renderActuators();
-    renderAutomationPanel();
-
-    if (triggerToast) {
-        const statusText = newState ? "MENYALA (ON)" : "MATI (OFF)";
-        const modeLabel = mockData.pumpMode === "MANUAL" ? "secara MANUAL" : "oleh SISTEM OTOMATIS";
-        showToast(`🚰 Pompa Air ${statusText} ${modeLabel}`, newState ? "info" : "warning");
-    }
-}
-
-/**
- * Update state Lampu Grow Light secara terpusat
- */
-function setLampState(newState, mode = null, triggerToast = true) {
-    mockData.lamp = newState;
-    if (mode) mockData.lampMode = mode;
-
-    renderActuators();
-    renderAutomationPanel();
-
-    if (triggerToast) {
-        const statusText = newState ? "MENYALA (ON)" : "MATI (OFF)";
-        const modeLabel = mockData.lampMode === "MANUAL" ? "secara MANUAL" : "oleh SISTEM OTOMATIS";
-        showToast(`💡 Lampu Grow Light ${statusText} ${modeLabel}`, newState ? "info" : "warning");
-    }
-}
-
-/**
- * Update state Buzzer
- */
-function setBuzzerState(newState, triggerToast = true) {
-    mockData.buzzer = newState;
-    renderActuators();
-
-    if (triggerToast) {
-        showToast(`🔔 Alarm Buzzer ${newState ? "MENYALA" : "DIMATIKAN"}`, newState ? "warning" : "info");
-    }
-}
-
-/**
- * System Notifikasi Toast mengambang yang bersih & mudah dipahami
- */
-function showToast(message, type = "info") {
-    const container = document.getElementById("toastContainer");
-    if (!container) return;
-
-    const toast = document.createElement("div");
-    toast.className = `toast-item toast-${type}`;
     
-    let icon = "ℹ️";
-    if (type === "warning") icon = "⚠️";
-    if (type === "success") icon = "✅";
+    // Pump Mode Badge
+    if (DOM.badgePumpMode) {
+        DOM.badgePumpMode.textContent = state.autoMode ? 'Mode: Otomatis' : 'Mode: Manual (User Override)';
+        DOM.badgePumpMode.className = `badge-mode-pill ${state.autoMode ? 'auto' : 'manual'}`;
+    }
+    
+    // Lamp Mode Badge
+    if (DOM.badgeLampMode) {
+        DOM.badgeLampMode.textContent = state.autoMode ? 'Mode: Otomatis' : 'Mode: Manual (User Override)';
+        DOM.badgeLampMode.className = `badge-mode-pill ${state.autoMode ? 'auto' : 'manual'}`;
+    }
+    
+    // Auto Metrics
+    if (DOM.autoSoilCurrent) {
+        DOM.autoSoilCurrent.textContent = state.soilMoisture !== null ? `${Math.round(state.soilMoisture)} %` : '-- %';
+    }
+    if (DOM.autoSoilPumpStatus) {
+        DOM.autoSoilPumpStatus.textContent = state.pump ? 'MENYALA (ON)' : 'MATI (OFF)';
+        DOM.autoSoilPumpStatus.className = `badge ${state.pump ? 'badge-on' : 'badge-off'}`;
+    }
+    if (DOM.autoLightStatus) {
+        DOM.autoLightStatus.textContent = state.light || '--';
+    }
+    if (DOM.autoLightLampStatus) {
+        DOM.autoLightLampStatus.textContent = state.lamp ? 'MENYALA (ON)' : 'MATI (OFF)';
+        DOM.autoLightLampStatus.className = `badge ${state.lamp ? 'badge-on' : 'badge-off'}`;
+    }
+    
+    // Card Highlight
+    if (DOM.cardControlPump) {
+        DOM.cardControlPump.classList.toggle('device-active-pump', state.pump);
+    }
+    if (DOM.cardControlLamp) {
+        DOM.cardControlLamp.classList.toggle('device-active-lamp', state.lamp);
+    }
+}
 
-    toast.innerHTML = `
-        <span class="toast-icon">${icon}</span>
-        <span class="toast-text">${message}</span>
-    `;
+function syncPumpToggle() {
+    if (DOM.togglePumpManual) DOM.togglePumpManual.checked = state.pump;
+    if (DOM.togglePumpCard) DOM.togglePumpCard.checked = state.pump;
+}
 
-    container.appendChild(toast);
-
-    setTimeout(() => {
-        toast.classList.add("show");
-    }, 10);
-
-    setTimeout(() => {
-        toast.classList.remove("show");
-        setTimeout(() => toast.remove(), 300);
-    }, 3200);
+function syncLampToggle() {
+    if (DOM.toggleLampManual) DOM.toggleLampManual.checked = state.lamp;
+    if (DOM.toggleLampCard) DOM.toggleLampCard.checked = state.lamp;
 }
 
 function updateLastTimestamp() {
     const now = new Date();
     const timeStr = now.toTimeString().split(' ')[0];
-
-    const sysStatusTime = document.getElementById("sysStatusTime");
-    const lastUpdateTime = document.getElementById("lastUpdateTime");
-
-    if (sysStatusTime) sysStatusTime.textContent = timeStr;
-    if (lastUpdateTime) lastUpdateTime.textContent = timeStr;
+    
+    if (DOM.sysStatusTime) DOM.sysStatusTime.textContent = timeStr;
+    if (DOM.lastUpdateTime) DOM.lastUpdateTime.textContent = timeStr;
 }
 
-/* ==========================================================================
-   8. ENVIRONMENT MONITORING CANVAS CHART
-   ========================================================================== */
+// ==================== CHART ====================
 function initChart() {
-    const canvas = document.getElementById("environmentChart");
+    const canvas = document.getElementById('environmentChart');
     if (!canvas) return;
 
-    const tabs = document.querySelectorAll(".chart-tab");
-    tabs.forEach(tab => {
-        tab.addEventListener("click", () => {
-            tabs.forEach(t => t.classList.remove("active"));
-            tab.classList.add("active");
-            currentChartTab = tab.dataset.target;
-            drawEnvironmentChart();
-        });
-    });
-
-    window.addEventListener("resize", () => {
-        drawEnvironmentChart();
-    });
-
-    drawEnvironmentChart();
-}
-
-function drawEnvironmentChart() {
-    const canvas = document.getElementById("environmentChart");
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-
-    // Handle high DPI scaling
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * window.devicePixelRatio;
-    canvas.height = rect.height * window.devicePixelRatio;
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
-
-    const width = rect.width;
-    const height = rect.height;
-
-    // Clear background
-    ctx.clearRect(0, 0, width, height);
-
-    const padding = { top: 25, right: 25, bottom: 35, left: 45 };
-    const chartW = width - padding.left - padding.right;
-    const chartH = height - padding.top - padding.bottom;
-
-    const dataPoints = currentChartTab === 'temp' ? chartHistory.tempData : chartHistory.soilData;
-    const minVal = currentChartTab === 'temp' ? 20 : 0;
-    const maxVal = currentChartTab === 'temp' ? 35 : 100;
-    const unit = currentChartTab === 'temp' ? '°C' : '%';
-    const lineColor = currentChartTab === 'temp' ? '#10b981' : '#38bdf8';
-    const gradientTop = currentChartTab === 'temp' ? 'rgba(16, 185, 129, 0.35)' : 'rgba(56, 189, 248, 0.35)';
-
-    // 1. Draw Horizontal Gridlines & Y-Axis Labels
-    const steps = 4;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
-    ctx.lineWidth = 1;
-    ctx.fillStyle = '#6b7280';
-    ctx.font = '11px "JetBrains Mono", monospace';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-
-    for (let i = 0; i <= steps; i++) {
-        const yVal = minVal + (maxVal - minVal) * (i / steps);
-        const yPos = padding.top + chartH - (i / steps) * chartH;
-
-        ctx.beginPath();
-        ctx.moveTo(padding.left, yPos);
-        ctx.lineTo(width - padding.right, yPos);
-        ctx.stroke();
-
-        ctx.fillText(`${yVal.toFixed(0)}${unit}`, padding.left - 8, yPos);
-    }
-
-    // 2. Draw X-Axis Time Labels
-    const totalPoints = dataPoints.length;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-
-    const stepX = chartW / (totalPoints - 1);
-    for (let i = 0; i < totalPoints; i += 3) {
-        const xPos = padding.left + i * stepX;
-        ctx.fillText(chartHistory.labels[i], xPos, height - padding.bottom + 10);
-    }
-
-    // 3. Compute Coordinates for Line Chart
-    const points = dataPoints.map((val, idx) => {
-        const x = padding.left + idx * stepX;
-        const normalized = (val - minVal) / (maxVal - minVal);
-        const y = padding.top + chartH - normalized * chartH;
-        return { x, y, val };
-    });
-
-    // 4. Draw Gradient Fill Under Line
-    const fillGradient = ctx.createLinearGradient(0, padding.top, 0, height - padding.bottom);
-    fillGradient.addColorStop(0, gradientTop);
-    fillGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-    for (let i = 1; i < points.length; i++) {
-        // Smooth cubic bezier curve
-        const xc = (points[i].x + points[i - 1].x) / 2;
-        const yc = (points[i].y + points[i - 1].y) / 2;
-        ctx.quadraticCurveTo(points[i - 1].x, points[i - 1].y, xc, yc);
-    }
-    ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-    ctx.lineTo(points[points.length - 1].x, height - padding.bottom);
-    ctx.lineTo(points[0].x, height - padding.bottom);
-    ctx.closePath();
-    ctx.fillStyle = fillGradient;
-    ctx.fill();
-
-    // 5. Draw Trend Line
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-    for (let i = 1; i < points.length; i++) {
-        const xc = (points[i].x + points[i - 1].x) / 2;
-        const yc = (points[i].y + points[i - 1].y) / 2;
-        ctx.quadraticCurveTo(points[i - 1].x, points[i - 1].y, xc, yc);
-    }
-    ctx.lineTo(points[points.length - 1].x, points[points.length - 1].y);
-    ctx.strokeStyle = lineColor;
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-
-    // 6. Draw Data Points
-    points.forEach((pt, idx) => {
-        ctx.beginPath();
-        ctx.arc(pt.x, pt.y, idx === points.length - 1 ? 5 : 3.5, 0, Math.PI * 2);
-        ctx.fillStyle = lineColor;
-        ctx.fill();
-
-        if (idx === points.length - 1) {
-            ctx.beginPath();
-            ctx.arc(pt.x, pt.y, 8, 0, Math.PI * 2);
-            ctx.strokeStyle = lineColor;
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
+    const ctx = canvas.getContext('2d');
+    
+    // Initialize with empty data
+    const initialLabels = Array(20).fill('--');
+    const initialData = Array(20).fill(0);
+    
+    chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: initialLabels,
+            datasets: [{
+                label: 'Temperature (°C)',
+                data: initialData,
+                borderColor: '#10b981',
+                backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                fill: true,
+                tension: 0.4,
+                borderWidth: 2,
+                pointRadius: 3,
+                pointBackgroundColor: '#10b981',
+                pointHoverRadius: 5
+            }, {
+                label: 'Soil Moisture (%)',
+                data: initialData,
+                borderColor: '#38bdf8',
+                backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                fill: true,
+                tension: 0.4,
+                borderWidth: 2,
+                pointRadius: 3,
+                pointBackgroundColor: '#38bdf8',
+                pointHoverRadius: 5,
+                hidden: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    labels: {
+                        color: '#9ca3af',
+                        font: {
+                            family: "'JetBrains Mono', monospace",
+                            size: 11
+                        }
+                    }
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false,
+                    backgroundColor: 'rgba(17, 24, 39, 0.9)',
+                    titleColor: '#f3f4f6',
+                    bodyColor: '#9ca3af',
+                    borderColor: 'rgba(255,255,255,0.1)',
+                    borderWidth: 1,
+                    padding: 10,
+                    cornerRadius: 8
+                }
+            },
+            scales: {
+                x: {
+                    grid: {
+                        color: 'rgba(255,255,255,0.05)'
+                    },
+                    ticks: {
+                        color: '#6b7280',
+                        maxTicksLimit: 10,
+                        font: {
+                            family: "'JetBrains Mono', monospace",
+                            size: 10
+                        }
+                    }
+                },
+                y: {
+                    grid: {
+                        color: 'rgba(255,255,255,0.05)'
+                    },
+                    ticks: {
+                        color: '#6b7280',
+                        font: {
+                            family: "'JetBrains Mono', monospace",
+                            size: 10
+                        }
+                    }
+                }
+            },
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            }
         }
     });
-}
 
-/* ==========================================================================
-   9. CAMERA MONITOR & RECENT CAPTURES SYSTEM
-   ========================================================================== */
-function initCameraModule() {
-    const btnCapture = document.getElementById("btnCaptureImage");
-    const btnClear = document.getElementById("btnClearRecent");
-
-    if (btnCapture) btnCapture.addEventListener("click", captureImage);
-    if (btnClear) btnClear.addEventListener("click", clearRecentCaptures);
-
-    initModal();
-}
-
-/**
- * Capture Image Function:
- * 1. Simulates capture process with loading overlay (500–1000 ms)
- * 2. Generates dynamic high-res plant snapshot onto Canvas
- * 3. Saves to 3-photo memory array
- * 4. Renders Recent Captures gallery
- */
-function captureImage() {
-    const placeholder = document.getElementById("cameraPlaceholder");
-    const canvas = document.getElementById("cameraCanvas");
-    const loading = document.getElementById("cameraLoading");
-    const btnCapture = document.getElementById("btnCaptureImage");
-
-    if (!canvas || !loading) return;
-
-    // 1. Show Loading State
-    loading.classList.remove("hidden");
-    if (btnCapture) btnCapture.disabled = true;
-
-    const delay = Math.floor(Math.random() * 400) + 600; // 600ms to 1000ms
-
-    setTimeout(() => {
-        // 2. Hide placeholder & loading, show canvas
-        if (placeholder) placeholder.classList.add("hidden");
-        canvas.classList.remove("hidden");
-        loading.classList.add("hidden");
-        if (btnCapture) btnCapture.disabled = false;
-
-        // 3. Render Plant Snapshot on Canvas
-        renderSimulatedPlantCanvas(canvas);
-
-        // 4. Extract Image Data & Add to Memory
-        const dataUrl = canvas.toDataURL("image/png");
-        const timestamp = new Date().toTimeString().split(' ')[0];
-
-        addRecentCapture({
-            id: Date.now(),
-            image: dataUrl,
-            timestamp: timestamp,
-            temp: mockData.temperature,
-            moisture: mockData.soilMoisture
+    // Chart Tab Controls
+    const tabs = document.querySelectorAll('.chart-tab');
+    tabs.forEach(tab => {
+        tab.addEventListener('click', () => {
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            
+            const target = tab.dataset.target;
+            const dataset1 = chartInstance.data.datasets[0];
+            const dataset2 = chartInstance.data.datasets[1];
+            
+            if (target === 'temp') {
+                dataset1.hidden = false;
+                dataset2.hidden = true;
+                dataset1.label = 'Temperature (°C)';
+            } else if (target === 'soil') {
+                dataset1.hidden = true;
+                dataset2.hidden = false;
+                dataset2.label = 'Soil Moisture (%)';
+            }
+            chartInstance.update();
         });
-
-    }, delay);
+    });
+    
+    // Initialize with temp view
+    chartInstance.data.datasets[1].hidden = true;
+    chartInstance.update();
 }
 
-/**
- * Draws a realistic Smart Farming greenhouse camera snapshot on Canvas
- */
-function renderSimulatedPlantCanvas(canvas) {
-    const ctx = canvas.getContext("2d");
+function updateChartData(temp, soil) {
+    if (!chartInstance) return;
+    
+    const now = new Date();
+    const label = now.getHours().toString().padStart(2, '0') + ':' + 
+                  now.getMinutes().toString().padStart(2, '0');
+    
+    // Add new data point
+    if (state.chartLabels.length >= state.maxChartPoints) {
+        state.chartLabels.shift();
+        state.chartTempData.shift();
+        state.chartSoilData.shift();
+    }
+    
+    state.chartLabels.push(label);
+    if (temp !== null) state.chartTempData.push(temp);
+    if (soil !== null) state.chartSoilData.push(soil);
+    
+    // Update chart
+    chartInstance.data.labels = state.chartLabels;
+    chartInstance.data.datasets[0].data = state.chartTempData;
+    chartInstance.data.datasets[1].data = state.chartSoilData;
+    chartInstance.update('none');
+}
+
+// ==================== MANUAL CONTROLS ====================
+function initManualControls() {
+    // Pump Toggle
+    [DOM.togglePumpManual, DOM.togglePumpCard].forEach(toggle => {
+        if (toggle) {
+            toggle.addEventListener('change', (e) => {
+                const value = e.target.checked ? 'ON' : 'OFF';
+                if (publishControl(MQTT_CONFIG.topics.controlPump, value)) {
+                    // If in auto mode, disable it
+                    if (state.autoMode) {
+                        state.autoMode = false;
+                        publishControl(MQTT_CONFIG.topics.controlAuto, 'OFF');
+                        renderAll();
+                        showToast('Mode Otomatis dinonaktifkan (manual override)', 'info');
+                    }
+                }
+            });
+        }
+    });
+    
+    // Lamp Toggle
+    [DOM.toggleLampManual, DOM.toggleLampCard].forEach(toggle => {
+        if (toggle) {
+            toggle.addEventListener('change', (e) => {
+                const value = e.target.checked ? 'ON' : 'OFF';
+                if (publishControl(MQTT_CONFIG.topics.controlLamp, value)) {
+                    if (state.autoMode) {
+                        state.autoMode = false;
+                        publishControl(MQTT_CONFIG.topics.controlAuto, 'OFF');
+                        renderAll();
+                        showToast('Mode Otomatis dinonaktifkan (manual override)', 'info');
+                    }
+                }
+            });
+        }
+    });
+    
+    // Buzzer Toggle
+    if (DOM.toggleBuzzerManual) {
+        DOM.toggleBuzzerManual.addEventListener('change', (e) => {
+            const value = e.target.checked ? 'ON' : 'OFF';
+            publishControl(MQTT_CONFIG.topics.controlBuzzer, value);
+        });
+    }
+    
+    // Quick Water
+    if (DOM.btnQuickWater) {
+        DOM.btnQuickWater.addEventListener('click', () => {
+            if (quickWaterTimer) {
+                clearInterval(quickWaterTimer);
+                quickWaterTimer = null;
+                publishControl(MQTT_CONFIG.topics.controlPump, 'OFF');
+                if (DOM.labelQuickWater) DOM.labelQuickWater.textContent = '💦 Siram Cepat (5 Detik)';
+                showToast('⏹️ Penyiraman manual dihentikan.', 'info');
+                return;
+            }
+            
+            let countdown = 5;
+            if (publishControl(MQTT_CONFIG.topics.controlPump, 'ON')) {
+                if (state.autoMode) {
+                    state.autoMode = false;
+                    publishControl(MQTT_CONFIG.topics.controlAuto, 'OFF');
+                    renderAll();
+                }
+                showToast('💦 Siram Cepat 5 Detik dimulai...', 'info');
+                if (DOM.labelQuickWater) DOM.labelQuickWater.textContent = `⏳ Menyiram... (${countdown}s)`;
+                
+                quickWaterTimer = setInterval(() => {
+                    countdown--;
+                    if (countdown > 0) {
+                        if (DOM.labelQuickWater) DOM.labelQuickWater.textContent = `⏳ Menyiram... (${countdown}s)`;
+                    } else {
+                        clearInterval(quickWaterTimer);
+                        quickWaterTimer = null;
+                        publishControl(MQTT_CONFIG.topics.controlPump, 'OFF');
+                        if (DOM.labelQuickWater) DOM.labelQuickWater.textContent = '💦 Siram Cepat (5 Detik)';
+                        showToast('✅ Penyiraman manual 5 detik telah selesai!', 'success');
+                    }
+                }, 1000);
+            }
+        });
+    }
+    
+    // Toggle Lamp Button
+    if (DOM.btnToggleLamp) {
+        DOM.btnToggleLamp.addEventListener('click', () => {
+            const newState = !state.lamp;
+            const value = newState ? 'ON' : 'OFF';
+            if (publishControl(MQTT_CONFIG.topics.controlLamp, value)) {
+                if (state.autoMode) {
+                    state.autoMode = false;
+                    publishControl(MQTT_CONFIG.topics.controlAuto, 'OFF');
+                    renderAll();
+                }
+                showToast(`💡 Lampu ${newState ? 'DINYALAKAN' : 'DIMATIKAN'}`, 'info');
+            }
+        });
+    }
+    
+    // Global Auto Mode
+    if (DOM.toggleGlobalAuto) {
+        DOM.toggleGlobalAuto.addEventListener('change', (e) => {
+            const value = e.target.checked ? 'ON' : 'OFF';
+            state.autoMode = e.target.checked;
+            if (publishControl(MQTT_CONFIG.topics.controlAuto, value)) {
+                renderAll();
+                showToast(state.autoMode ? '🤖 Mode Otomatis Diaktifkan' : '🖐️ Mode Manual Diaktifkan', 'info');
+            }
+        });
+    }
+}
+
+// ==================== RECONNECT BUTTON ====================
+function initReconnectButton() {
+    if (DOM.btnReconnectMQTT) {
+        DOM.btnReconnectMQTT.addEventListener('click', () => {
+            showToast('🔄 Reconnecting MQTT...', 'info');
+            if (mqttClient) {
+                mqttClient.end();
+                setTimeout(initMQTT, 1000);
+            } else {
+                initMQTT();
+            }
+        });
+    }
+}
+
+// ==================== CAMERA MODULE ====================
+function initCameraModule() {
+    if (DOM.btnCaptureImage) {
+        DOM.btnCaptureImage.addEventListener('click', captureImage);
+    }
+    
+    if (DOM.btnClearRecent) {
+        DOM.btnClearRecent.addEventListener('click', clearRecentCaptures);
+    }
+    
+    if (DOM.modalClose) {
+        DOM.modalClose.addEventListener('click', () => {
+            DOM.imageModal.classList.add('hidden');
+        });
+    }
+    
+    if (DOM.imageModal) {
+        DOM.imageModal.addEventListener('click', (e) => {
+            if (e.target === DOM.imageModal) {
+                DOM.imageModal.classList.add('hidden');
+            }
+        });
+    }
+}
+
+function captureImage() {
+    // Show loading
+    DOM.cameraLoading.classList.remove('hidden');
+    DOM.cameraPlaceholder.classList.add('hidden');
+    DOM.cameraCanvas.classList.add('hidden');
+    if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = true;
+    
+    // Publish camera capture command via MQTT
+    const published = publishControl(MQTT_CONFIG.topics.cameraCapture, 'CAPTURE');
+    
+    if (!published) {
+        // Fallback: Simulate capture if MQTT not connected
+        simulateCapture();
+        return;
+    }
+    
+    // Wait for response (simulated)
+    setTimeout(() => {
+        simulateCapture();
+    }, 1500);
+}
+
+function simulateCapture() {
+    // Hide loading
+    DOM.cameraLoading.classList.add('hidden');
+    if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
+    
+    // Render simulated image
+    const canvas = DOM.cameraCanvas;
+    const ctx = canvas.getContext('2d');
     const w = canvas.width;
     const h = canvas.height;
-
-    // Background: Dark Greenhouse Environment
+    
+    // Background
     const bgGrad = ctx.createLinearGradient(0, 0, w, h);
     bgGrad.addColorStop(0, '#0f172a');
     bgGrad.addColorStop(0.5, '#064e3b');
     bgGrad.addColorStop(1, '#022c22');
     ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, w, h);
-
-    // Draw Soil Pot Base
+    
+    // Soil
     ctx.fillStyle = '#1c1917';
     ctx.beginPath();
     ctx.ellipse(w / 2, h - 40, w / 3, 40, 0, 0, Math.PI * 2);
     ctx.fill();
-
-    // Draw Plant Stem
+    
+    // Plant Stem
     ctx.strokeStyle = '#22c55e';
     ctx.lineWidth = 12;
     ctx.lineCap = 'round';
@@ -687,8 +1022,8 @@ function renderSimulatedPlantCanvas(canvas) {
     ctx.moveTo(w / 2, h - 40);
     ctx.quadraticCurveTo(w / 2 - 30, h / 2 + 20, w / 2, 90);
     ctx.stroke();
-
-    // Draw Plant Leaves (Multiple overlapping leaves)
+    
+    // Leaves
     const drawLeaf = (cx, cy, rx, ry, angle, color) => {
         ctx.save();
         ctx.translate(cx, cy);
@@ -699,72 +1034,83 @@ function renderSimulatedPlantCanvas(canvas) {
         ctx.fill();
         ctx.restore();
     };
-
+    
     drawLeaf(w / 2 - 50, h / 2, 60, 25, -30, '#16a34a');
     drawLeaf(w / 2 + 55, h / 2 - 30, 70, 30, 25, '#22c55e');
     drawLeaf(w / 2 - 60, h / 2 - 70, 65, 25, -45, '#4ade80');
     drawLeaf(w / 2 + 45, h / 2 - 100, 55, 22, 35, '#15803d');
     drawLeaf(w / 2, 70, 45, 20, 0, '#86efac');
-
-    // Draw Hydroponic / Tomato Fruit Accent
+    
+    // Fruits
     ctx.fillStyle = '#ef4444';
     ctx.beginPath();
     ctx.arc(w / 2 + 30, h / 2 + 10, 16, 0, Math.PI * 2);
     ctx.arc(w / 2 - 25, h / 2 - 40, 14, 0, Math.PI * 2);
     ctx.fill();
-
-    // Camera Telemetry Overlay Grid (HUD style)
+    
+    // HUD Overlay
+    const margin = 20;
     ctx.strokeStyle = 'rgba(16, 185, 129, 0.4)';
     ctx.lineWidth = 1.5;
-
+    
     // Corner brackets
     const bSize = 24;
-    const margin = 20;
-
-    // Top-Left
     ctx.beginPath(); ctx.moveTo(margin, margin + bSize); ctx.lineTo(margin, margin); ctx.lineTo(margin + bSize, margin); ctx.stroke();
-    // Top-Right
     ctx.beginPath(); ctx.moveTo(w - margin - bSize, margin); ctx.lineTo(w - margin, margin); ctx.lineTo(w - margin, margin + bSize); ctx.stroke();
-    // Bottom-Left
     ctx.beginPath(); ctx.moveTo(margin, h - margin - bSize); ctx.lineTo(margin, h - margin); ctx.lineTo(margin + bSize, h - margin); ctx.stroke();
-    // Bottom-Right
     ctx.beginPath(); ctx.moveTo(w - margin - bSize, h - margin); ctx.lineTo(w - margin, h - margin); ctx.lineTo(w - margin, h - margin - bSize); ctx.stroke();
-
-    // HUD Metadata Overlay text
+    
+    // Info
     ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
     ctx.fillRect(margin + 10, margin + 10, 220, 55);
     ctx.strokeStyle = 'rgba(16, 185, 129, 0.5)';
     ctx.strokeRect(margin + 10, margin + 10, 220, 55);
-
+    
     ctx.fillStyle = '#34d399';
     ctx.font = '12px "JetBrains Mono", monospace';
+    const timeStr = new Date().toTimeString().split(' ')[0];
     ctx.fillText(`CAM: ESP32-CAM [1080p]`, margin + 20, margin + 28);
-    ctx.fillText(`TIME: ${new Date().toTimeString().split(' ')[0]}`, margin + 20, margin + 44);
-    ctx.fillText(`TEMP: ${mockData.temperature}°C  SOIL: ${mockData.soilMoisture}%`, margin + 20, margin + 58);
+    ctx.fillText(`TIME: ${timeStr}`, margin + 20, margin + 44);
+    ctx.fillText(`TEMP: ${state.temperature || '--'}°C  SOIL: ${state.soilMoisture || '--'}%`, margin + 20, margin + 58);
+    
+    // Show canvas
+    canvas.classList.remove('hidden');
+    DOM.cameraPlaceholder.classList.add('hidden');
+    
+    // Add to gallery
+    const dataUrl = canvas.toDataURL('image/png');
+    addRecentCapture({
+        id: Date.now(),
+        image: dataUrl,
+        timestamp: timeStr,
+        temp: state.temperature,
+        moisture: state.soilMoisture
+    });
+    
+    if (DOM.cameraStatusBadge) {
+        DOM.cameraStatusBadge.textContent = 'CAPTURED';
+        DOM.cameraStatusBadge.className = 'badge badge-success';
+    }
+    if (DOM.cameraMetaStatus) {
+        DOM.cameraMetaStatus.textContent = 'CAPTURED';
+        DOM.cameraMetaStatus.className = 'meta-val status-online';
+    }
+    
+    showToast('📸 Image captured successfully!', 'success');
 }
 
-/**
- * Adds captured image to in-memory FIFO array (Max 3 photos)
- * When 4th photo arrives, oldest photo is dropped!
- * @param {Object} captureObj 
- */
-function addRecentCapture(captureObj) {
-    recentCaptures.unshift(captureObj); // Push new capture to front
-
+function addRecentCapture(capture) {
+    recentCaptures.unshift(capture);
     if (recentCaptures.length > 3) {
-        recentCaptures.pop(); // Remove oldest photo (4th)
+        recentCaptures.pop();
     }
-
     renderRecentCaptures();
 }
 
-/**
- * Render up to 3 recent photos in the gallery
- */
 function renderRecentCaptures() {
-    const gallery = document.getElementById("recentGallery");
+    const gallery = DOM.recentGallery;
     if (!gallery) return;
-
+    
     if (recentCaptures.length === 0) {
         gallery.innerHTML = `
             <div class="gallery-empty">
@@ -774,7 +1120,7 @@ function renderRecentCaptures() {
         `;
         return;
     }
-
+    
     gallery.innerHTML = recentCaptures.map((cap, index) => `
         <div class="gallery-item" data-index="${index}">
             <div class="gallery-img-wrap">
@@ -783,217 +1129,80 @@ function renderRecentCaptures() {
             </div>
             <div class="gallery-info">
                 <span class="gallery-time">${cap.timestamp}</span>
-                <span class="gallery-meta">${cap.temp}°C • Moisture ${cap.moisture}%</span>
+                <span class="gallery-meta">${cap.temp !== null ? cap.temp.toFixed(1) : '--'}°C • Moisture ${cap.moisture !== null ? cap.moisture : '--'}%</span>
             </div>
         </div>
     `).join('');
-
-    // Attach click listeners to gallery items for Modal preview
-    const items = gallery.querySelectorAll(".gallery-item");
+    
+    // Attach click listeners
+    const items = gallery.querySelectorAll('.gallery-item');
     items.forEach(item => {
-        item.addEventListener("click", () => {
+        item.addEventListener('click', () => {
             const idx = parseInt(item.dataset.index);
             openModal(recentCaptures[idx]);
         });
     });
 }
 
-/**
- * Clear in-memory photo gallery
- */
 function clearRecentCaptures() {
     recentCaptures = [];
     renderRecentCaptures();
-}
-
-/* ==========================================================================
-   10. IMAGE PREVIEW MODAL
-   ========================================================================== */
-function initModal() {
-    const modal = document.getElementById("imageModal");
-    const closeBtn = document.getElementById("modalClose");
-
-    if (closeBtn) {
-        closeBtn.addEventListener("click", () => {
-            modal.classList.add("hidden");
-        });
-    }
-
-    if (modal) {
-        modal.addEventListener("click", (e) => {
-            if (e.target === modal) modal.classList.add("hidden");
-        });
-    }
+    showToast('🗑️ Gallery cleared', 'info');
 }
 
 function openModal(capture) {
-    const modal = document.getElementById("imageModal");
-    const img = document.getElementById("modalImage");
-    const timeStr = document.getElementById("modalTimestamp");
-    const metaStr = document.getElementById("modalMeta");
-
-    if (modal && img) {
-        img.src = capture.image;
-        if (timeStr) timeStr.textContent = `Timestamp: ${capture.timestamp}`;
-        if (metaStr) metaStr.textContent = `Camera: ESP32-CAM • Temp: ${capture.temp}°C • Moisture: ${capture.moisture}%`;
-        modal.classList.remove("hidden");
+    if (!DOM.imageModal || !DOM.modalImage) return;
+    
+    DOM.modalImage.src = capture.image;
+    if (DOM.modalTimestamp) {
+        DOM.modalTimestamp.textContent = `Timestamp: ${capture.timestamp}`;
     }
+    if (DOM.modalMeta) {
+        DOM.modalMeta.textContent = `Camera: ESP32-CAM • Temp: ${capture.temp !== null ? capture.temp.toFixed(1) : '--'}°C • Moisture: ${capture.moisture !== null ? capture.moisture : '--'}%`;
+    }
+    DOM.imageModal.classList.remove('hidden');
 }
 
-/* ==========================================================================
-   11. SIMULATION TICK & UI DEMO CONTROLS
-   ========================================================================== */
-function initSimulationControls() {
-    const btnSimulate = document.getElementById("btnSimulateTick");
-    const toggleAuto = document.getElementById("toggleGlobalAuto");
-    const badgeAuto = document.getElementById("badgeGlobalAuto");
-
-    if (btnSimulate) {
-        btnSimulate.addEventListener("click", () => {
-            // Generate minor natural random fluctuations
-            const newTemp = +(mockData.temperature + (Math.random() * 0.6 - 0.3)).toFixed(1);
-            const newHum = +(mockData.humidity + (Math.random() * 2 - 1)).toFixed(1);
-            const newSoil = Math.max(20, Math.min(90, Math.round(mockData.soilMoisture + (Math.random() * 4 - 2))));
-
-            updateSensorData({
-                temperature: newTemp,
-                humidity: newHum,
-                soilMoisture: newSoil
-            });
-
-            // Logic otomatis jika mode pompa dalam keadaan AUTO
-            if (mockData.pumpMode === "AUTO") {
-                const autoPumpState = newSoil < 35;
-                setPumpState(autoPumpState, "AUTO", false);
-            }
-
-            // Append to chart history
-            const nowTime = new Date().toTimeString().substring(0, 5);
-            chartHistory.labels.shift();
-            chartHistory.labels.push(nowTime);
-            chartHistory.tempData.shift();
-            chartHistory.tempData.push(newTemp);
-            chartHistory.soilData.shift();
-            chartHistory.soilData.push(newSoil);
-
-            drawEnvironmentChart();
-        });
-    }
-
-    if (toggleAuto && badgeAuto) {
-        toggleAuto.addEventListener("change", (e) => {
-            const isChecked = e.target.checked;
-            mockData.isAutoMode = isChecked;
-            
-            badgeAuto.textContent = isChecked ? "AKTIF" : "NONAKTIF";
-            badgeAuto.style.color = isChecked ? "var(--accent-green)" : "var(--text-muted)";
-
-            if (isChecked) {
-                mockData.pumpMode = "AUTO";
-                mockData.lampMode = "AUTO";
-                // Recheck auto logic
-                if (mockData.soilMoisture < 35) setPumpState(true, "AUTO", false);
-                else setPumpState(false, "AUTO", false);
-
-                showToast("🤖 Mode Otomatis Global Diaktifkan", "success");
-            } else {
-                mockData.pumpMode = "MANUAL";
-                mockData.lampMode = "MANUAL";
-                showToast("🖐️ Mode Manual Global Diaktifkan", "info");
-            }
-
-            renderActuators();
-            renderAutomationPanel();
-        });
-    }
+// ==================== TOAST ====================
+function showToast(message, type = 'info') {
+    const container = DOM.toastContainer;
+    if (!container) return;
+    
+    const toast = document.createElement('div');
+    toast.className = `toast-item toast-${type}`;
+    
+    let icon = 'ℹ️';
+    if (type === 'warning') icon = '⚠️';
+    if (type === 'success') icon = '✅';
+    if (type === 'error') icon = '❌';
+    
+    toast.innerHTML = `
+        <span class="toast-icon">${icon}</span>
+        <span class="toast-text">${message}</span>
+    `;
+    
+    container.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.classList.add('show');
+    }, 10);
+    
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => toast.remove(), 300);
+    }, 3500);
 }
 
-/* ==========================================================================
-   12. KONTROL MANUAL PERANGKAT (LAMPU & POMPA AIR)
-   ========================================================================== */
-let quickWaterTimer = null;
+// ==================== EXPOSE FOR DEBUG ====================
+window.debug = {
+    state: state,
+    MQTT_CONFIG: MQTT_CONFIG,
+    mqttClient: mqttClient,
+    DOM: DOM,
+    recentCaptures: recentCaptures,
+    publishControl: publishControl,
+    showToast: showToast
+};
 
-function initManualControls() {
-    const togglePumpManual = document.getElementById("togglePumpManual");
-    const togglePumpCard = document.getElementById("togglePumpCard");
-    const toggleLampManual = document.getElementById("toggleLampManual");
-    const toggleLampCard = document.getElementById("toggleLampCard");
-    const toggleBuzzerManual = document.getElementById("toggleBuzzerManual");
-    const btnQuickWater = document.getElementById("btnQuickWater");
-    const btnToggleLamp = document.getElementById("btnToggleLamp");
-
-    // 1. Sakelar Manual Pompa Air
-    if (togglePumpManual) {
-        togglePumpManual.addEventListener("change", (e) => {
-            setPumpState(e.target.checked, "MANUAL");
-        });
-    }
-
-    if (togglePumpCard) {
-        togglePumpCard.addEventListener("change", (e) => {
-            setPumpState(e.target.checked, "MANUAL");
-        });
-    }
-
-    // 2. Sakelar Manual Lampu Grow Light
-    if (toggleLampManual) {
-        toggleLampManual.addEventListener("change", (e) => {
-            setLampState(e.target.checked, "MANUAL");
-        });
-    }
-
-    if (toggleLampCard) {
-        toggleLampCard.addEventListener("change", (e) => {
-            setLampState(e.target.checked, "MANUAL");
-        });
-    }
-
-    // 3. Tombol Aksi Cepat Lampu Toggle
-    if (btnToggleLamp) {
-        btnToggleLamp.addEventListener("click", () => {
-            setLampState(!mockData.lamp, "MANUAL");
-        });
-    }
-
-    // 4. Sakelar Manual Alarm Buzzer
-    if (toggleBuzzerManual) {
-        toggleBuzzerManual.addEventListener("change", (e) => {
-            setBuzzerState(e.target.checked);
-        });
-    }
-
-    // 5. Tombol Aksi Cepat: Siram Cepat 5 Detik
-    if (btnQuickWater) {
-        const labelQuick = document.getElementById("labelQuickWater");
-
-        btnQuickWater.addEventListener("click", () => {
-            if (quickWaterTimer) {
-                // Hentikan penyiraman aktif
-                clearInterval(quickWaterTimer);
-                quickWaterTimer = null;
-                setPumpState(false, "MANUAL", false);
-                if (labelQuick) labelQuick.textContent = "💦 Siram Cepat (5 Detik)";
-                showToast("⏹️ Penyiraman manual dihentikan.", "info");
-                return;
-            }
-
-            let countdown = 5;
-            setPumpState(true, "MANUAL", false);
-            showToast("💦 Siram Cepat 5 Detik dimulai...", "info");
-            if (labelQuick) labelQuick.textContent = `⏳ Menyiram... (${countdown}s)`;
-
-            quickWaterTimer = setInterval(() => {
-                countdown--;
-                if (countdown > 0) {
-                    if (labelQuick) labelQuick.textContent = `⏳ Menyiram... (${countdown}s)`;
-                } else {
-                    clearInterval(quickWaterTimer);
-                    quickWaterTimer = null;
-                    setPumpState(false, "MANUAL", false);
-                    if (labelQuick) labelQuick.textContent = "💦 Siram Cepat (5 Detik)";
-                    showToast("✅ Penyiraman manual 5 detik telah selesai!", "success");
-                }
-            }, 1000);
-        });
-    }
-}
+console.log('🔧 Debug: Type "debug" in console to see state');
+console.log('🔧 Debug: Type "debug.publishControl(topic, value)" to send MQTT');
