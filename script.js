@@ -1,6 +1,6 @@
 /* ==========================================================================
    SMART FARMING IOT DASHBOARD - FULL MQTT INTEGRATION v2.1
-   DENGAN ESP32-CAM SUPPORT
+   DENGAN ESP32-CAM SUPPORT - FIXED
    ========================================================================== */
 
 // ==================== MQTT CONFIGURATION ====================
@@ -226,17 +226,14 @@ document.addEventListener('DOMContentLoaded', () => {
     initReconnectButton();
     updateLastTimestamp();
     
-    // Set default mode
     if (DOM.toggleGlobalAuto) {
         DOM.toggleGlobalAuto.checked = true;
         state.autoMode = true;
     }
     
-    // Set initial status
     state.systemStatus = 'ONLINE';
     renderAll();
     
-    // Check connection status periodically
     setInterval(checkConnectionStatus, 10000);
 });
 
@@ -516,39 +513,53 @@ function handleMQTTMessage(topic, payload) {
     }
     
     // ==========================================================
-    // HANDLE CAMERA IMAGE
+    // HANDLE CAMERA IMAGE - FIXED
     // ==========================================================
     
     if (topic === topics.cameraImage) {
+        console.log('📸 Camera image received!');
+        console.log('📸 Payload length:', payload.length);
+        console.log('📸 First 50 chars:', payload.substring(0, 50));
+        
+        // Cek apakah ini chunk atau full image
         if (payload.includes(':/')) {
+            console.log('📸 Detected as chunk');
             handleImageChunk(payload);
         } else {
+            console.log('📸 Detected as full image');
             displayCameraImage(payload);
         }
         return;
     }
     
     if (topic === topics.cameraResponse) {
+        console.log('📸 Camera response:', payload);
         showToast('📸 Camera: ' + payload, 'info');
         if (payload === 'CAPTURING') {
-            DOM.cameraStatusBadge.textContent = '📸 CAPTURING';
-            DOM.cameraStatusBadge.className = 'badge badge-off';
-            DOM.cameraStatusBadge.style.borderColor = 'var(--accent-amber)';
-            DOM.cameraStatusBadge.style.color = 'var(--accent-amber)';
+            if (DOM.cameraStatusBadge) {
+                DOM.cameraStatusBadge.textContent = '📸 CAPTURING';
+                DOM.cameraStatusBadge.className = 'badge badge-off';
+                DOM.cameraStatusBadge.style.borderColor = 'var(--accent-amber)';
+                DOM.cameraStatusBadge.style.color = 'var(--accent-amber)';
+            }
         } else if (payload === 'DONE') {
-            DOM.cameraStatusBadge.textContent = 'IMAGE READY';
-            DOM.cameraStatusBadge.className = 'badge badge-success';
-            DOM.cameraStatusBadge.style.borderColor = '';
-            DOM.cameraStatusBadge.style.color = '';
-            DOM.cameraLoading.classList.add('hidden');
-            DOM.btnCaptureImage.disabled = false;
+            if (DOM.cameraStatusBadge) {
+                DOM.cameraStatusBadge.textContent = 'IMAGE READY';
+                DOM.cameraStatusBadge.className = 'badge badge-success';
+                DOM.cameraStatusBadge.style.borderColor = '';
+                DOM.cameraStatusBadge.style.color = '';
+            }
+            if (DOM.cameraLoading) DOM.cameraLoading.classList.add('hidden');
+            if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
         } else if (payload === 'ERROR' || payload === 'ENCODE_ERROR' || payload === 'MQTT_ERROR') {
-            DOM.cameraStatusBadge.textContent = 'ERROR';
-            DOM.cameraStatusBadge.className = 'badge badge-off';
-            DOM.cameraStatusBadge.style.borderColor = 'var(--accent-red)';
-            DOM.cameraStatusBadge.style.color = 'var(--accent-red)';
-            DOM.cameraLoading.classList.add('hidden');
-            DOM.btnCaptureImage.disabled = false;
+            if (DOM.cameraStatusBadge) {
+                DOM.cameraStatusBadge.textContent = 'ERROR';
+                DOM.cameraStatusBadge.className = 'badge badge-off';
+                DOM.cameraStatusBadge.style.borderColor = 'var(--accent-red)';
+                DOM.cameraStatusBadge.style.color = 'var(--accent-red)';
+            }
+            if (DOM.cameraLoading) DOM.cameraLoading.classList.add('hidden');
+            if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
             showToast('❌ Camera error: ' + payload, 'error');
         }
         return;
@@ -1289,16 +1300,101 @@ function initReconnectButton() {
 }
 
 // ==================== CAMERA IMAGE HANDLING ====================
+
+function displayCameraImage(base64Data) {
+    console.log('📸 Displaying camera image...');
+    console.log('📸 Base64 data length:', base64Data.length);
+    console.log('📸 First 100 chars:', base64Data.substring(0, 100));
+    
+    const canvas = DOM.cameraCanvas;
+    const ctx = canvas.getContext('2d');
+    const placeholder = DOM.cameraPlaceholder;
+    const loading = DOM.cameraLoading;
+    const btnCapture = DOM.btnCaptureImage;
+    
+    if (!canvas) {
+        console.error('❌ Camera canvas not found!');
+        return;
+    }
+    
+    // Buat image object
+    const img = new Image();
+    
+    img.onload = function() {
+        console.log('✅ Image loaded successfully!');
+        console.log('📐 Image size:', img.width, 'x', img.height);
+        
+        // Set canvas size sesuai gambar
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        // Tampilkan canvas
+        canvas.classList.remove('hidden');
+        if (placeholder) placeholder.classList.add('hidden');
+        if (loading) loading.classList.add('hidden');
+        if (btnCapture) btnCapture.disabled = false;
+        
+        // Update status
+        if (DOM.cameraStatusBadge) {
+            DOM.cameraStatusBadge.textContent = 'IMAGE READY';
+            DOM.cameraStatusBadge.className = 'badge badge-success';
+            DOM.cameraStatusBadge.style.borderColor = '';
+            DOM.cameraStatusBadge.style.color = '';
+        }
+        if (DOM.cameraMetaStatus) {
+            DOM.cameraMetaStatus.textContent = 'IMAGE RECEIVED';
+            DOM.cameraMetaStatus.className = 'meta-val status-online';
+            DOM.cameraMetaStatus.style.color = '';
+        }
+        
+        // Tambahkan ke gallery
+        const timeStr = new Date().toTimeString().split(' ')[0];
+        addRecentCapture({
+            id: Date.now(),
+            image: canvas.toDataURL('image/jpeg', 0.8),
+            timestamp: timeStr,
+            temp: state.temperature,
+            moisture: state.soilMoisture
+        });
+        
+        showToast('📸 Image received from ESP32-CAM!', 'success');
+        console.log('✅ Display complete!');
+    };
+    
+    img.onerror = function(e) {
+        console.error('❌ Failed to decode image:', e);
+        console.error('❌ Base64 data (first 200 chars):', base64Data.substring(0, 200));
+        showToast('❌ Failed to decode image', 'error');
+        if (loading) loading.classList.add('hidden');
+        if (btnCapture) btnCapture.disabled = false;
+    };
+    
+    // Set src dengan format yang benar
+    img.src = 'data:image/jpeg;base64,' + base64Data;
+    console.log('📸 Image src set, waiting for load...');
+}
+
 function handleImageChunk(payload) {
+    console.log('📦 Handling chunk:', payload.substring(0, 50));
+    
     const parts = payload.split(':');
-    if (parts.length !== 2) return;
+    if (parts.length !== 2) {
+        console.error('❌ Invalid chunk format');
+        return;
+    }
     
     const metaParts = parts[0].split('/');
-    if (metaParts.length !== 2) return;
+    if (metaParts.length !== 2) {
+        console.error('❌ Invalid chunk meta');
+        return;
+    }
     
     const chunkNum = parseInt(metaParts[0]);
     const totalChunks = parseInt(metaParts[1]);
     const chunkData = parts[1];
+    
+    console.log(`📦 Chunk ${chunkNum}/${totalChunks}`);
     
     if (!imageChunks[totalChunks]) {
         imageChunks[totalChunks] = {};
@@ -1307,76 +1403,47 @@ function handleImageChunk(payload) {
     
     imageChunks[totalChunks][chunkNum] = chunkData;
     
+    // Cek apakah semua chunk sudah diterima
     let allReceived = true;
+    let receivedCount = 0;
     for (let i = 1; i <= totalChunks; i++) {
-        if (!imageChunks[totalChunks][i]) {
+        if (imageChunks[totalChunks][i]) {
+            receivedCount++;
+        } else {
             allReceived = false;
             break;
         }
     }
     
+    console.log(`📦 Received ${receivedCount}/${totalChunks} chunks`);
+    
     if (allReceived) {
+        console.log('📦 All chunks received, combining...');
         let fullImage = '';
         for (let i = 1; i <= totalChunks; i++) {
             fullImage += imageChunks[totalChunks][i];
         }
         
+        console.log('📦 Combined image length:', fullImage.length);
         displayCameraImage(fullImage);
+        
+        // Clear chunks
         delete imageChunks[totalChunks];
     }
-}
-
-function displayCameraImage(base64Data) {
-    const canvas = DOM.cameraCanvas;
-    const ctx = canvas.getContext('2d');
-    
-    const img = new Image();
-    img.onload = function() {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        
-        canvas.classList.remove('hidden');
-        DOM.cameraPlaceholder.classList.add('hidden');
-        DOM.cameraLoading.classList.add('hidden');
-        if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
-        
-        if (DOM.cameraStatusBadge) {
-            DOM.cameraStatusBadge.textContent = 'IMAGE READY';
-            DOM.cameraStatusBadge.className = 'badge badge-success';
-        }
-        if (DOM.cameraMetaStatus) {
-            DOM.cameraMetaStatus.textContent = 'IMAGE RECEIVED';
-            DOM.cameraMetaStatus.className = 'meta-val status-online';
-        }
-        
-        const timeStr = new Date().toTimeString().split(' ')[0];
-        addRecentCapture({
-            id: Date.now(),
-            image: canvas.toDataURL('image/png'),
-            timestamp: timeStr,
-            temp: state.temperature,
-            moisture: state.soilMoisture
-        });
-        
-        showToast('📸 Image received from ESP32-CAM!', 'success');
-    };
-    img.onerror = function() {
-        showToast('❌ Failed to decode image', 'error');
-        DOM.cameraLoading.classList.add('hidden');
-        if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
-    };
-    img.src = 'data:image/jpeg;base64,' + base64Data;
 }
 
 function updateCameraStatus(data) {
     const status = data.status || 'UNKNOWN';
     const cameraReady = data.camera_ready || false;
     
+    console.log('📷 Updating camera status:', status);
+    
     if (DOM.cameraStatusBadge) {
         if (status === 'ONLINE' && cameraReady) {
             DOM.cameraStatusBadge.textContent = 'CAMERA READY';
             DOM.cameraStatusBadge.className = 'badge badge-success';
+            DOM.cameraStatusBadge.style.borderColor = '';
+            DOM.cameraStatusBadge.style.color = '';
         } else if (status === 'CAPTURING') {
             DOM.cameraStatusBadge.textContent = '📸 CAPTURING';
             DOM.cameraStatusBadge.className = 'badge badge-off';
@@ -1400,9 +1467,11 @@ function updateCameraStatus(data) {
         if (status === 'ONLINE' && cameraReady) {
             DOM.cameraMetaStatus.textContent = 'READY';
             DOM.cameraMetaStatus.className = 'meta-val status-online';
+            DOM.cameraMetaStatus.style.color = '';
         } else if (status === 'OK') {
             DOM.cameraMetaStatus.textContent = 'OK';
             DOM.cameraMetaStatus.className = 'meta-val status-online';
+            DOM.cameraMetaStatus.style.color = '';
         } else if (status === 'ERROR') {
             DOM.cameraMetaStatus.textContent = 'ERROR';
             DOM.cameraMetaStatus.className = 'meta-val';
@@ -1441,17 +1510,20 @@ function initCameraModule() {
 }
 
 function captureImage() {
-    DOM.cameraLoading.classList.remove('hidden');
-    DOM.cameraPlaceholder.classList.add('hidden');
-    DOM.cameraCanvas.classList.add('hidden');
+    // Show loading
+    if (DOM.cameraLoading) DOM.cameraLoading.classList.remove('hidden');
+    if (DOM.cameraPlaceholder) DOM.cameraPlaceholder.classList.add('hidden');
+    if (DOM.cameraCanvas) DOM.cameraCanvas.classList.add('hidden');
     if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = true;
     
+    // Kirim perintah capture via MQTT
     const published = publishControl(MQTT_CONFIG.topics.cameraCapture, 'CAPTURE');
     
     if (!published) {
+        // Fallback: simulasi jika MQTT tidak konek
         setTimeout(() => {
-            DOM.cameraLoading.classList.add('hidden');
-            DOM.btnCaptureImage.disabled = false;
+            if (DOM.cameraLoading) DOM.cameraLoading.classList.add('hidden');
+            if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
             showToast('⚠️ MQTT not connected, using simulation', 'warning');
             simulateCapture();
         }, 1500);
@@ -1467,10 +1539,11 @@ function captureImage() {
         DOM.cameraStatusBadge.style.color = 'var(--accent-amber)';
     }
     
+    // Timeout jika tidak ada response
     setTimeout(() => {
         if (DOM.cameraLoading && !DOM.cameraLoading.classList.contains('hidden')) {
             DOM.cameraLoading.classList.add('hidden');
-            DOM.btnCaptureImage.disabled = false;
+            if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
             if (DOM.cameraStatusBadge) {
                 DOM.cameraStatusBadge.textContent = 'TIMEOUT';
                 DOM.cameraStatusBadge.className = 'badge badge-off';
@@ -1483,7 +1556,7 @@ function captureImage() {
 }
 
 function simulateCapture() {
-    DOM.cameraLoading.classList.add('hidden');
+    if (DOM.cameraLoading) DOM.cameraLoading.classList.add('hidden');
     if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
     
     const canvas = DOM.cameraCanvas;
