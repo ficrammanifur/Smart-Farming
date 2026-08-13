@@ -1,6 +1,6 @@
 /* ==========================================================================
    SMART FARMING IOT DASHBOARD - FULL MQTT INTEGRATION v2.1
-   PERBAIKAN: Stabil, Auto-reconnect, Error Handling, Auto-Online Detection
+   DENGAN ESP32-CAM SUPPORT
    ========================================================================== */
 
 // ==================== MQTT CONFIGURATION ====================
@@ -37,7 +37,13 @@ const MQTT_CONFIG = {
         status: 'smartfarm/status/esp32',
         
         // Feedback (dari ESP32)
-        feedback: 'smartfarm/feedback/#'
+        feedback: 'smartfarm/feedback/#',
+        
+        // Camera Topics
+        cameraCapture: 'smartfarm/camera/capture',
+        cameraImage: 'smartfarm/camera/image',
+        cameraResponse: 'smartfarm/camera/response',
+        cameraStatus: 'smartfarm/camera/status'
     }
 };
 
@@ -59,7 +65,7 @@ const state = {
     buzzer: false,
     
     // System
-    systemStatus: 'ONLINE', // Default ONLINE
+    systemStatus: 'ONLINE',
     autoMode: true,
     alarm: false,
     uptime: 0,
@@ -72,7 +78,7 @@ const state = {
     lastUpdate: null,
     messageCount: 0,
     reconnectAttempts: 0,
-    hasReceivedData: false, // Flag untuk cek apakah pernah terima data
+    hasReceivedData: false,
     
     // Chart History
     chartLabels: [],
@@ -202,6 +208,10 @@ let recentCaptures = [];
 let isConnecting = false;
 let reconnectTimeout = null;
 
+// ==================== CAMERA IMAGE CHUNK HANDLER ====================
+let imageChunks = {};
+let imageChunkTotal = 0;
+
 // ==================== INIT ====================
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🌱 Smart Farming Dashboard v2.1');
@@ -269,7 +279,6 @@ function initMQTT() {
     isConnecting = true;
     
     try {
-        // Close existing connection
         if (mqttClient) {
             try {
                 mqttClient.end(true);
@@ -307,7 +316,6 @@ function initMQTT() {
             updateConnectionUI('connected', 'MQTT Connected', 'Online');
             showToast('MQTT Connected successfully!', 'success');
             
-            // Subscribe to all topics
             const topics = Object.values(MQTT_CONFIG.topics);
             topics.forEach(topic => {
                 mqttClient.subscribe(topic, { qos: 1 }, (err) => {
@@ -319,7 +327,6 @@ function initMQTT() {
                 });
             });
             
-            // Request status
             setTimeout(() => {
                 showToast('📡 Waiting for sensor data...', 'info');
             }, 1000);
@@ -327,7 +334,7 @@ function initMQTT() {
 
         mqttClient.on('message', (topic, message) => {
             const payload = message.toString();
-            console.log('📥', topic, '->', payload);
+            console.log('📥', topic, '->', payload.substring(0, 100) + (payload.length > 100 ? '...' : ''));
             handleMQTTMessage(topic, payload);
         });
 
@@ -339,7 +346,6 @@ function initMQTT() {
             updateConnectionUI('disconnected', 'MQTT Error', 'Offline');
             showToast('MQTT Error: ' + err.message, 'error');
             
-            // Auto reconnect after delay
             if (reconnectTimeout) clearTimeout(reconnectTimeout);
             reconnectTimeout = setTimeout(() => {
                 if (!state.connected) {
@@ -366,7 +372,6 @@ function initMQTT() {
         isConnecting = false;
         showToast('MQTT Init error: ' + e.message, 'error');
         
-        // Retry after delay
         if (reconnectTimeout) clearTimeout(reconnectTimeout);
         reconnectTimeout = setTimeout(() => {
             initMQTT();
@@ -378,21 +383,18 @@ function initMQTT() {
 function handleMQTTMessage(topic, payload) {
     const topics = MQTT_CONFIG.topics;
     
-    // Update last update time
     state.lastUpdate = new Date();
     updateLastTimestamp();
     state.messageCount++;
     state.hasReceivedData = true;
     
     // ==========================================================
-    // HANDLE INDIVIDUAL SENSOR TOPICS (tanpa menunggu status JSON)
+    // HANDLE INDIVIDUAL SENSOR TOPICS
     // ==========================================================
     
-    // Temperature
     if (topic === topics.temperature) {
         state.temperature = parseFloat(payload);
         updateChartData(state.temperature, null);
-        // Auto-set ONLINE jika menerima data
         if (state.systemStatus === 'OFFLINE' || state.systemStatus === 'SENSOR ERROR') {
             state.systemStatus = 'ONLINE';
         }
@@ -400,7 +402,6 @@ function handleMQTTMessage(topic, payload) {
         return;
     }
     
-    // Humidity
     else if (topic === topics.humidity) {
         state.humidity = parseFloat(payload);
         if (state.systemStatus === 'OFFLINE' || state.systemStatus === 'SENSOR ERROR') {
@@ -410,7 +411,6 @@ function handleMQTTMessage(topic, payload) {
         return;
     }
     
-    // Soil Moisture
     else if (topic === topics.soilMoisture) {
         state.soilMoisture = parseInt(payload);
         updateChartData(null, state.soilMoisture);
@@ -421,7 +421,6 @@ function handleMQTTMessage(topic, payload) {
         return;
     }
     
-    // Water Level
     else if (topic === topics.waterLevel) {
         state.waterLevel = parseInt(payload);
         if (state.systemStatus === 'OFFLINE' || state.systemStatus === 'SENSOR ERROR') {
@@ -431,7 +430,6 @@ function handleMQTTMessage(topic, payload) {
         return;
     }
     
-    // Light Status
     else if (topic === topics.light) {
         state.light = payload;
         if (state.systemStatus === 'OFFLINE' || state.systemStatus === 'SENSOR ERROR') {
@@ -441,7 +439,6 @@ function handleMQTTMessage(topic, payload) {
         return;
     }
     
-    // Actuator States
     else if (topic === topics.pump) {
         state.pump = payload === 'ON';
         syncPumpToggle();
@@ -461,7 +458,7 @@ function handleMQTTMessage(topic, payload) {
     }
     
     // ==========================================================
-    // PARSE JSON STATUS (jika ada)
+    // PARSE JSON STATUS
     // ==========================================================
     
     if (topic === topics.status) {
@@ -469,7 +466,6 @@ function handleMQTTMessage(topic, payload) {
             const data = JSON.parse(payload);
             console.log('📊 Status JSON:', data);
             
-            // Update state from JSON
             if (data.temperature !== undefined) state.temperature = data.temperature;
             if (data.humidity !== undefined) state.humidity = data.humidity;
             if (data.soil_moisture !== undefined) state.soilMoisture = data.soil_moisture;
@@ -489,7 +485,6 @@ function handleMQTTMessage(topic, payload) {
             if (data.wifi !== undefined) state.wifiConnected = data.wifi;
             if (data.mqtt !== undefined) state.mqttConnected = data.mqtt;
             
-            // Update UI
             renderAll();
             return;
         } catch (e) {
@@ -520,7 +515,56 @@ function handleMQTTMessage(topic, payload) {
         return;
     }
     
-    // Render UI jika ada perubahan
+    // ==========================================================
+    // HANDLE CAMERA IMAGE
+    // ==========================================================
+    
+    if (topic === topics.cameraImage) {
+        if (payload.includes(':/')) {
+            handleImageChunk(payload);
+        } else {
+            displayCameraImage(payload);
+        }
+        return;
+    }
+    
+    if (topic === topics.cameraResponse) {
+        showToast('📸 Camera: ' + payload, 'info');
+        if (payload === 'CAPTURING') {
+            DOM.cameraStatusBadge.textContent = '📸 CAPTURING';
+            DOM.cameraStatusBadge.className = 'badge badge-off';
+            DOM.cameraStatusBadge.style.borderColor = 'var(--accent-amber)';
+            DOM.cameraStatusBadge.style.color = 'var(--accent-amber)';
+        } else if (payload === 'DONE') {
+            DOM.cameraStatusBadge.textContent = 'IMAGE READY';
+            DOM.cameraStatusBadge.className = 'badge badge-success';
+            DOM.cameraStatusBadge.style.borderColor = '';
+            DOM.cameraStatusBadge.style.color = '';
+            DOM.cameraLoading.classList.add('hidden');
+            DOM.btnCaptureImage.disabled = false;
+        } else if (payload === 'ERROR' || payload === 'ENCODE_ERROR' || payload === 'MQTT_ERROR') {
+            DOM.cameraStatusBadge.textContent = 'ERROR';
+            DOM.cameraStatusBadge.className = 'badge badge-off';
+            DOM.cameraStatusBadge.style.borderColor = 'var(--accent-red)';
+            DOM.cameraStatusBadge.style.color = 'var(--accent-red)';
+            DOM.cameraLoading.classList.add('hidden');
+            DOM.btnCaptureImage.disabled = false;
+            showToast('❌ Camera error: ' + payload, 'error');
+        }
+        return;
+    }
+    
+    if (topic === topics.cameraStatus) {
+        try {
+            const data = JSON.parse(payload);
+            console.log('📷 Camera Status:', data);
+            updateCameraStatus(data);
+        } catch (e) {
+            console.warn('Camera status parse error:', e);
+        }
+        return;
+    }
+    
     renderAll();
 }
 
@@ -574,7 +618,6 @@ function updateConnectionUI(status, title, sub) {
 }
 
 function renderSystemStatus() {
-    // Jika sudah menerima data, set status ONLINE
     if (state.hasReceivedData && state.systemStatus === 'OFFLINE') {
         state.systemStatus = 'ONLINE';
     }
@@ -583,7 +626,6 @@ function renderSystemStatus() {
     const isWarning = state.systemStatus === 'WARNING';
     const isSensorError = state.systemStatus === 'SENSOR ERROR';
     
-    // System Status Card
     if (DOM.sysStatusDot) {
         if (isOnline) {
             DOM.sysStatusDot.className = 'status-dot-lg online';
@@ -634,8 +676,6 @@ function renderSystemStatus() {
         if (isOnline) {
             DOM.sysStatusBadge.textContent = 'NORMAL';
             DOM.sysStatusBadge.className = 'badge badge-success';
-            DOM.sysStatusBadge.style.borderColor = '';
-            DOM.sysStatusBadge.style.color = '';
         } else if (isWarning) {
             DOM.sysStatusBadge.textContent = 'WARNING';
             DOM.sysStatusBadge.className = 'badge badge-off';
@@ -649,12 +689,9 @@ function renderSystemStatus() {
         } else {
             DOM.sysStatusBadge.textContent = 'ALERT';
             DOM.sysStatusBadge.className = 'badge badge-off';
-            DOM.sysStatusBadge.style.borderColor = '';
-            DOM.sysStatusBadge.style.color = '';
         }
     }
     
-    // Header Status
     if (DOM.headerSystemStatus) {
         if (isOnline) {
             DOM.headerSystemStatus.textContent = 'SYSTEM ONLINE';
@@ -670,8 +707,6 @@ function renderSystemStatus() {
     if (DOM.headerStatusPill) {
         if (isOnline) {
             DOM.headerStatusPill.className = 'status-pill online';
-            DOM.headerStatusPill.style.borderColor = 'rgba(16, 185, 129, 0.3)';
-            DOM.headerStatusPill.style.color = 'var(--accent-green)';
         } else if (isWarning) {
             DOM.headerStatusPill.className = 'status-pill warning';
             DOM.headerStatusPill.style.borderColor = 'rgba(245, 158, 11, 0.3)';
@@ -697,7 +732,6 @@ function renderSystemStatus() {
         }
     }
     
-    // Dot System
     if (DOM.dotSystem) {
         DOM.dotSystem.className = `state-dot ${isOnline ? 'on' : isWarning ? 'warning' : 'off'}`;
         if (isWarning) {
@@ -750,7 +784,6 @@ function renderSystemStatus() {
 }
 
 function renderSensorCards() {
-    // Temperature
     if (DOM.valTemperature) {
         DOM.valTemperature.textContent = state.temperature !== null ? state.temperature.toFixed(1) : '--';
     }
@@ -772,12 +805,9 @@ function renderSensorCards() {
         } else {
             DOM.statusTemperature.textContent = 'Normal';
             DOM.statusTemperature.className = 'badge badge-outline-success';
-            DOM.statusTemperature.style.borderColor = '';
-            DOM.statusTemperature.style.color = '';
         }
     }
     
-    // Humidity
     if (DOM.valHumidity) {
         DOM.valHumidity.textContent = state.humidity !== null ? Math.round(state.humidity) : '--';
     }
@@ -799,12 +829,9 @@ function renderSensorCards() {
         } else {
             DOM.statusHumidity.textContent = 'Normal';
             DOM.statusHumidity.className = 'badge badge-outline-success';
-            DOM.statusHumidity.style.borderColor = '';
-            DOM.statusHumidity.style.color = '';
         }
     }
     
-    // Soil Moisture
     if (DOM.valSoilMoisture) {
         DOM.valSoilMoisture.textContent = state.soilMoisture !== null ? Math.round(state.soilMoisture) : '--';
     }
@@ -828,7 +855,6 @@ function renderSensorCards() {
         }
     }
     
-    // Water Level
     if (DOM.valWaterLevel) {
         if (state.waterLevel !== null && state.waterLevel >= 0) {
             DOM.valWaterLevel.textContent = Math.round(state.waterLevel);
@@ -877,7 +903,6 @@ function renderEnvironmentSummary() {
 }
 
 function renderActuators() {
-    // Pump
     if (DOM.statePump) {
         DOM.statePump.textContent = state.pump ? 'MENYALA' : 'MATI';
         DOM.statePump.className = state.pump ? 'state-text active' : 'state-text';
@@ -891,7 +916,6 @@ function renderActuators() {
         DOM.modeTextPump.textContent = state.autoMode ? 'Mode: Otomatis' : 'Mode: Manual (Pengguna)';
     }
     
-    // Lamp
     if (DOM.stateLamp) {
         DOM.stateLamp.textContent = state.lamp ? 'MENYALA' : 'MATI';
         DOM.stateLamp.className = state.lamp ? 'state-text active' : 'state-text';
@@ -905,7 +929,6 @@ function renderActuators() {
         DOM.modeTextLamp.textContent = state.autoMode ? 'Mode: Otomatis' : 'Mode: Manual (Pengguna)';
     }
     
-    // Buzzer
     if (DOM.stateBuzzer) {
         DOM.stateBuzzer.textContent = state.buzzer ? 'MENYALA' : 'MATI';
         DOM.stateBuzzer.className = state.buzzer ? 'state-text active' : 'state-text';
@@ -919,7 +942,6 @@ function renderActuators() {
 }
 
 function renderAutomationPanel() {
-    // Auto Mode
     if (DOM.toggleGlobalAuto) {
         DOM.toggleGlobalAuto.checked = state.autoMode;
     }
@@ -928,19 +950,16 @@ function renderAutomationPanel() {
         DOM.badgeGlobalAuto.style.color = state.autoMode ? 'var(--accent-green)' : 'var(--text-muted)';
     }
     
-    // Pump Mode Badge
     if (DOM.badgePumpMode) {
         DOM.badgePumpMode.textContent = state.autoMode ? 'Mode: Otomatis' : 'Mode: Manual (User Override)';
         DOM.badgePumpMode.className = `badge-mode-pill ${state.autoMode ? 'auto' : 'manual'}`;
     }
     
-    // Lamp Mode Badge
     if (DOM.badgeLampMode) {
         DOM.badgeLampMode.textContent = state.autoMode ? 'Mode: Otomatis' : 'Mode: Manual (User Override)';
         DOM.badgeLampMode.className = `badge-mode-pill ${state.autoMode ? 'auto' : 'manual'}`;
     }
     
-    // Auto Metrics
     if (DOM.autoSoilCurrent) {
         DOM.autoSoilCurrent.textContent = state.soilMoisture !== null ? `${Math.round(state.soilMoisture)} %` : '-- %';
     }
@@ -956,7 +975,6 @@ function renderAutomationPanel() {
         DOM.autoLightLampStatus.className = `badge ${state.lamp ? 'badge-on' : 'badge-off'}`;
     }
     
-    // Card Highlight
     if (DOM.cardControlPump) {
         DOM.cardControlPump.classList.toggle('device-active-pump', state.pump);
     }
@@ -1049,9 +1067,7 @@ function initChart() {
             },
             scales: {
                 x: {
-                    grid: {
-                        color: 'rgba(255,255,255,0.05)'
-                    },
+                    grid: { color: 'rgba(255,255,255,0.05)' },
                     ticks: {
                         color: '#6b7280',
                         maxTicksLimit: 10,
@@ -1062,9 +1078,7 @@ function initChart() {
                     }
                 },
                 y: {
-                    grid: {
-                        color: 'rgba(255,255,255,0.05)'
-                    },
+                    grid: { color: 'rgba(255,255,255,0.05)' },
                     ticks: {
                         color: '#6b7280',
                         font: {
@@ -1081,7 +1095,6 @@ function initChart() {
         }
     });
 
-    // Chart Tab Controls
     const tabs = document.querySelectorAll('.chart-tab');
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
@@ -1134,7 +1147,6 @@ function updateChartData(temp, soil) {
 
 // ==================== MANUAL CONTROLS ====================
 function initManualControls() {
-    // Pump Toggle
     [DOM.togglePumpManual, DOM.togglePumpCard].forEach(toggle => {
         if (toggle) {
             toggle.addEventListener('change', (e) => {
@@ -1147,14 +1159,12 @@ function initManualControls() {
                         showToast('Mode Otomatis dinonaktifkan (manual override)', 'info');
                     }
                 } else {
-                    // Revert if publish failed
                     e.target.checked = !e.target.checked;
                 }
             });
         }
     });
     
-    // Lamp Toggle
     [DOM.toggleLampManual, DOM.toggleLampCard].forEach(toggle => {
         if (toggle) {
             toggle.addEventListener('change', (e) => {
@@ -1173,7 +1183,6 @@ function initManualControls() {
         }
     });
     
-    // Buzzer Toggle
     if (DOM.toggleBuzzerManual) {
         DOM.toggleBuzzerManual.addEventListener('change', (e) => {
             const value = e.target.checked ? 'ON' : 'OFF';
@@ -1183,11 +1192,9 @@ function initManualControls() {
         });
     }
     
-    // Quick Water
     if (DOM.btnQuickWater) {
         DOM.btnQuickWater.addEventListener('click', () => {
             if (state.quickWaterActive) {
-                // Cancel quick water
                 state.quickWaterActive = false;
                 if (quickWaterTimer) {
                     clearInterval(quickWaterTimer);
@@ -1199,7 +1206,6 @@ function initManualControls() {
                 return;
             }
             
-            // Check water safety
             if (state.waterLevel !== null && state.waterLevel <= 20) {
                 showToast('⚠️ Water level critical! Cannot start watering.', 'warning');
                 return;
@@ -1236,7 +1242,6 @@ function initManualControls() {
         });
     }
     
-    // Toggle Lamp Button
     if (DOM.btnToggleLamp) {
         DOM.btnToggleLamp.addEventListener('click', () => {
             const newState = !state.lamp;
@@ -1252,7 +1257,6 @@ function initManualControls() {
         });
     }
     
-    // Global Auto Mode
     if (DOM.toggleGlobalAuto) {
         DOM.toggleGlobalAuto.addEventListener('change', (e) => {
             const value = e.target.checked ? 'ON' : 'OFF';
@@ -1281,6 +1285,133 @@ function initReconnectButton() {
                 initMQTT();
             }, 1000);
         });
+    }
+}
+
+// ==================== CAMERA IMAGE HANDLING ====================
+function handleImageChunk(payload) {
+    const parts = payload.split(':');
+    if (parts.length !== 2) return;
+    
+    const metaParts = parts[0].split('/');
+    if (metaParts.length !== 2) return;
+    
+    const chunkNum = parseInt(metaParts[0]);
+    const totalChunks = parseInt(metaParts[1]);
+    const chunkData = parts[1];
+    
+    if (!imageChunks[totalChunks]) {
+        imageChunks[totalChunks] = {};
+        imageChunkTotal = totalChunks;
+    }
+    
+    imageChunks[totalChunks][chunkNum] = chunkData;
+    
+    let allReceived = true;
+    for (let i = 1; i <= totalChunks; i++) {
+        if (!imageChunks[totalChunks][i]) {
+            allReceived = false;
+            break;
+        }
+    }
+    
+    if (allReceived) {
+        let fullImage = '';
+        for (let i = 1; i <= totalChunks; i++) {
+            fullImage += imageChunks[totalChunks][i];
+        }
+        
+        displayCameraImage(fullImage);
+        delete imageChunks[totalChunks];
+    }
+}
+
+function displayCameraImage(base64Data) {
+    const canvas = DOM.cameraCanvas;
+    const ctx = canvas.getContext('2d');
+    
+    const img = new Image();
+    img.onload = function() {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        canvas.classList.remove('hidden');
+        DOM.cameraPlaceholder.classList.add('hidden');
+        DOM.cameraLoading.classList.add('hidden');
+        if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
+        
+        if (DOM.cameraStatusBadge) {
+            DOM.cameraStatusBadge.textContent = 'IMAGE READY';
+            DOM.cameraStatusBadge.className = 'badge badge-success';
+        }
+        if (DOM.cameraMetaStatus) {
+            DOM.cameraMetaStatus.textContent = 'IMAGE RECEIVED';
+            DOM.cameraMetaStatus.className = 'meta-val status-online';
+        }
+        
+        const timeStr = new Date().toTimeString().split(' ')[0];
+        addRecentCapture({
+            id: Date.now(),
+            image: canvas.toDataURL('image/png'),
+            timestamp: timeStr,
+            temp: state.temperature,
+            moisture: state.soilMoisture
+        });
+        
+        showToast('📸 Image received from ESP32-CAM!', 'success');
+    };
+    img.onerror = function() {
+        showToast('❌ Failed to decode image', 'error');
+        DOM.cameraLoading.classList.add('hidden');
+        if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
+    };
+    img.src = 'data:image/jpeg;base64,' + base64Data;
+}
+
+function updateCameraStatus(data) {
+    const status = data.status || 'UNKNOWN';
+    const cameraReady = data.camera_ready || false;
+    
+    if (DOM.cameraStatusBadge) {
+        if (status === 'ONLINE' && cameraReady) {
+            DOM.cameraStatusBadge.textContent = 'CAMERA READY';
+            DOM.cameraStatusBadge.className = 'badge badge-success';
+        } else if (status === 'CAPTURING') {
+            DOM.cameraStatusBadge.textContent = '📸 CAPTURING';
+            DOM.cameraStatusBadge.className = 'badge badge-off';
+            DOM.cameraStatusBadge.style.borderColor = 'var(--accent-amber)';
+            DOM.cameraStatusBadge.style.color = 'var(--accent-amber)';
+        } else if (status === 'OK') {
+            DOM.cameraStatusBadge.textContent = '✅ READY';
+            DOM.cameraStatusBadge.className = 'badge badge-success';
+        } else if (status === 'ERROR') {
+            DOM.cameraStatusBadge.textContent = '❌ ERROR';
+            DOM.cameraStatusBadge.className = 'badge badge-off';
+            DOM.cameraStatusBadge.style.borderColor = 'var(--accent-red)';
+            DOM.cameraStatusBadge.style.color = 'var(--accent-red)';
+        } else {
+            DOM.cameraStatusBadge.textContent = status;
+            DOM.cameraStatusBadge.className = 'badge badge-off';
+        }
+    }
+    
+    if (DOM.cameraMetaStatus) {
+        if (status === 'ONLINE' && cameraReady) {
+            DOM.cameraMetaStatus.textContent = 'READY';
+            DOM.cameraMetaStatus.className = 'meta-val status-online';
+        } else if (status === 'OK') {
+            DOM.cameraMetaStatus.textContent = 'OK';
+            DOM.cameraMetaStatus.className = 'meta-val status-online';
+        } else if (status === 'ERROR') {
+            DOM.cameraMetaStatus.textContent = 'ERROR';
+            DOM.cameraMetaStatus.className = 'meta-val';
+            DOM.cameraMetaStatus.style.color = 'var(--accent-red)';
+        } else {
+            DOM.cameraMetaStatus.textContent = status;
+            DOM.cameraMetaStatus.className = 'meta-val';
+            DOM.cameraMetaStatus.style.color = '';
+        }
     }
 }
 
@@ -1318,13 +1449,37 @@ function captureImage() {
     const published = publishControl(MQTT_CONFIG.topics.cameraCapture, 'CAPTURE');
     
     if (!published) {
-        simulateCapture();
+        setTimeout(() => {
+            DOM.cameraLoading.classList.add('hidden');
+            DOM.btnCaptureImage.disabled = false;
+            showToast('⚠️ MQTT not connected, using simulation', 'warning');
+            simulateCapture();
+        }, 1500);
         return;
     }
     
+    showToast('📸 Capture command sent to ESP32-CAM', 'info');
+    
+    if (DOM.cameraStatusBadge) {
+        DOM.cameraStatusBadge.textContent = '📤 SENT';
+        DOM.cameraStatusBadge.className = 'badge badge-off';
+        DOM.cameraStatusBadge.style.borderColor = 'var(--accent-amber)';
+        DOM.cameraStatusBadge.style.color = 'var(--accent-amber)';
+    }
+    
     setTimeout(() => {
-        simulateCapture();
-    }, 1500);
+        if (DOM.cameraLoading && !DOM.cameraLoading.classList.contains('hidden')) {
+            DOM.cameraLoading.classList.add('hidden');
+            DOM.btnCaptureImage.disabled = false;
+            if (DOM.cameraStatusBadge) {
+                DOM.cameraStatusBadge.textContent = 'TIMEOUT';
+                DOM.cameraStatusBadge.className = 'badge badge-off';
+                DOM.cameraStatusBadge.style.borderColor = 'var(--accent-red)';
+                DOM.cameraStatusBadge.style.color = 'var(--accent-red)';
+            }
+            showToast('⏰ Camera timeout - no response', 'warning');
+        }
+    }, 15000);
 }
 
 function simulateCapture() {
