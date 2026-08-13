@@ -1,6 +1,6 @@
 /* ==========================================================================
    SMART FARMING IOT DASHBOARD - FULL MQTT INTEGRATION v2.1
-   DENGAN ESP32-CAM SUPPORT - FIXED
+   DENGAN ESP32-CAM SUPPORT - FIXED DISPLAY
    ========================================================================== */
 
 // ==================== MQTT CONFIGURATION ====================
@@ -520,6 +520,7 @@ function handleMQTTMessage(topic, payload) {
         console.log('📸 Camera image received!');
         console.log('📸 Payload length:', payload.length);
         console.log('📸 First 50 chars:', payload.substring(0, 50));
+        console.log('📸 Last 50 chars:', payload.substring(payload.length - 50));
         
         // Cek apakah ini chunk atau full image
         if (payload.includes(':/')) {
@@ -1299,7 +1300,9 @@ function initReconnectButton() {
     }
 }
 
-// ==================== CAMERA IMAGE HANDLING ====================
+// ================================================================
+// ESP32-CAM IMAGE HANDLING - FIXED
+// ================================================================
 
 function displayCameraImage(base64Data) {
     console.log('📸 Displaying camera image...');
@@ -1311,13 +1314,37 @@ function displayCameraImage(base64Data) {
     const placeholder = DOM.cameraPlaceholder;
     const loading = DOM.cameraLoading;
     const btnCapture = DOM.btnCaptureImage;
+    const statusBadge = DOM.cameraStatusBadge;
+    const metaStatus = DOM.cameraMetaStatus;
     
     if (!canvas) {
         console.error('❌ Camera canvas not found!');
         return;
     }
     
-    // Buat image object
+    // ==========================================================
+    // CEK APAKAH BASE64 VALID
+    // ==========================================================
+    
+    if (!base64Data || base64Data.length < 100) {
+        console.error('❌ Base64 data too short or empty!');
+        showToast('❌ Invalid image data', 'error');
+        if (loading) loading.classList.add('hidden');
+        if (btnCapture) btnCapture.disabled = false;
+        return;
+    }
+    
+    // Cek apakah base64 dimulai dengan marker JPEG
+    if (!base64Data.startsWith('/9j/')) {
+        console.warn('⚠️ Base64 does not start with JPEG marker (/9j/)');
+        console.warn('⚠️ First 50 chars:', base64Data.substring(0, 50));
+        // Tetap lanjutkan, mungkin masih bisa ditampilkan
+    }
+    
+    // ==========================================================
+    // TAMPILKAN GAMBAR
+    // ==========================================================
+    
     const img = new Image();
     
     img.onload = function() {
@@ -1327,6 +1354,10 @@ function displayCameraImage(base64Data) {
         // Set canvas size sesuai gambar
         canvas.width = img.width;
         canvas.height = img.height;
+        
+        // Gambar dengan background putih agar lebih terang
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         
         // Tampilkan canvas
@@ -1336,23 +1367,23 @@ function displayCameraImage(base64Data) {
         if (btnCapture) btnCapture.disabled = false;
         
         // Update status
-        if (DOM.cameraStatusBadge) {
-            DOM.cameraStatusBadge.textContent = 'IMAGE READY';
-            DOM.cameraStatusBadge.className = 'badge badge-success';
-            DOM.cameraStatusBadge.style.borderColor = '';
-            DOM.cameraStatusBadge.style.color = '';
+        if (statusBadge) {
+            statusBadge.textContent = 'IMAGE READY';
+            statusBadge.className = 'badge badge-success';
+            statusBadge.style.borderColor = '';
+            statusBadge.style.color = '';
         }
-        if (DOM.cameraMetaStatus) {
-            DOM.cameraMetaStatus.textContent = 'IMAGE RECEIVED';
-            DOM.cameraMetaStatus.className = 'meta-val status-online';
-            DOM.cameraMetaStatus.style.color = '';
+        if (metaStatus) {
+            metaStatus.textContent = 'IMAGE RECEIVED';
+            metaStatus.className = 'meta-val status-online';
+            metaStatus.style.color = '';
         }
         
         // Tambahkan ke gallery
         const timeStr = new Date().toTimeString().split(' ')[0];
         addRecentCapture({
             id: Date.now(),
-            image: canvas.toDataURL('image/jpeg', 0.8),
+            image: canvas.toDataURL('image/jpeg', 0.9),
             timestamp: timeStr,
             temp: state.temperature,
             moisture: state.soilMoisture
@@ -1365,15 +1396,36 @@ function displayCameraImage(base64Data) {
     img.onerror = function(e) {
         console.error('❌ Failed to decode image:', e);
         console.error('❌ Base64 data (first 200 chars):', base64Data.substring(0, 200));
+        console.error('❌ Base64 data (last 50 chars):', base64Data.substring(base64Data.length - 50));
         showToast('❌ Failed to decode image', 'error');
         if (loading) loading.classList.add('hidden');
         if (btnCapture) btnCapture.disabled = false;
+        
+        // Tampilkan error di canvas
+        canvas.classList.remove('hidden');
+        canvas.width = 640;
+        canvas.height = 480;
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#ef4444';
+        ctx.font = '20px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText('❌ Failed to load image', canvas.width/2, canvas.height/2 - 10);
+        ctx.fillStyle = '#6b7280';
+        ctx.font = '14px Arial';
+        ctx.fillText('Check console for details', canvas.width/2, canvas.height/2 + 30);
+        
+        if (placeholder) placeholder.classList.add('hidden');
     };
     
     // Set src dengan format yang benar
-    img.src = 'data:image/jpeg;base64,' + base64Data;
+    const fullDataUrl = 'data:image/jpeg;base64,' + base64Data;
+    console.log('📸 Image src length:', fullDataUrl.length);
+    img.src = fullDataUrl;
     console.log('📸 Image src set, waiting for load...');
 }
+
+// ==================== CAMERA IMAGE CHUNK HANDLER ====================
 
 function handleImageChunk(payload) {
     console.log('📦 Handling chunk:', payload.substring(0, 50));
@@ -1431,6 +1483,8 @@ function handleImageChunk(payload) {
         delete imageChunks[totalChunks];
     }
 }
+
+// ==================== CAMERA STATUS UPDATE ====================
 
 function updateCameraStatus(data) {
     const status = data.status || 'UNKNOWN';
