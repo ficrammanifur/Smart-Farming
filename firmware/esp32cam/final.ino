@@ -1,15 +1,7 @@
 /*
  * ============================================================
  * ESP32-CAM - SMART FARMING CAMERA MODULE
- * WITH MQTT + WiFiManager
- * ============================================================
- * 
- * FITUR:
- * - Web Server untuk akses gambar via browser
- * - MQTT untuk trigger capture dari dashboard
- * - WiFiManager untuk setting WiFi mudah
- * - Kirim gambar via MQTT ke dashboard
- * 
+ * DENGAN FLASH DAN BRIGHTNESS FIX
  * ============================================================
  */
 
@@ -24,7 +16,7 @@
 // SELECT CAMERA MODEL
 // ============================================================
 
-#define CAMERA_MODEL_AI_THINKER // ESP32-CAM AI-Thinker
+#define CAMERA_MODEL_AI_THINKER
 #include "camera_pins.h"
 
 // ============================================================
@@ -35,11 +27,16 @@
 #define MQTT_PORT 1883
 #define MQTT_CLIENT_ID "esp32-cam-001"
 
-// Topics
 #define TOPIC_CAMERA_CAPTURE   "smartfarm/camera/capture"
 #define TOPIC_CAMERA_IMAGE     "smartfarm/camera/image"
 #define TOPIC_CAMERA_RESPONSE  "smartfarm/camera/response"
 #define TOPIC_CAMERA_STATUS    "smartfarm/camera/status"
+
+// ============================================================
+// PIN DEFINISI
+// ============================================================
+
+#define FLASH_LED_PIN     4   // GPIO 4 untuk flash LED
 
 // ============================================================
 // OBJECTS
@@ -59,7 +56,7 @@ bool cameraReady = false;
 bool captureInProgress = false;
 
 unsigned long lastAutoCapture = 0;
-unsigned long autoCaptureInterval = 60000; // 1 menit
+unsigned long autoCaptureInterval = 60000;
 
 // ============================================================
 // FUNCTION PROTOTYPES
@@ -98,6 +95,13 @@ void setup() {
     Serial.println("================================================\n");
 
     // ==========================================================
+    // PIN MODE
+    // ==========================================================
+
+    pinMode(FLASH_LED_PIN, OUTPUT);
+    digitalWrite(FLASH_LED_PIN, LOW);
+
+    // ==========================================================
     // INIT CAMERA
     // ==========================================================
 
@@ -112,7 +116,7 @@ void setup() {
     }
 
     // ==========================================================
-    // SETUP WIFI (WiFiManager)
+    // SETUP WIFI
     // ==========================================================
 
     setupWiFi();
@@ -146,22 +150,12 @@ void setup() {
         publishResponse("SYSTEM_READY");
     }
 
-    // ==========================================================
-    // STARTUP COMPLETE
-    // ==========================================================
-
     Serial.println("\n[OK] SYSTEM READY!");
     Serial.println("================================================\n");
     Serial.println("COMMANDS (via Serial):");
     Serial.println("  capture - Take a photo");
     Serial.println("  status  - Show system status");
     Serial.println("  reset   - Reset system");
-    Serial.println("================================================\n");
-    Serial.println("MQTT Topics:");
-    Serial.println("  Subscribe: " + String(TOPIC_CAMERA_CAPTURE));
-    Serial.println("  Publish:   " + String(TOPIC_CAMERA_IMAGE));
-    Serial.println("  Publish:   " + String(TOPIC_CAMERA_RESPONSE));
-    Serial.println("  Publish:   " + String(TOPIC_CAMERA_STATUS));
     Serial.println("================================================\n");
 }
 
@@ -171,10 +165,6 @@ void setup() {
 
 void loop() {
     unsigned long now = millis();
-
-    // ==========================================================
-    // MQTT LOOP
-    // ==========================================================
 
     if (mqttConnected) {
         mqttClient.loop();
@@ -186,10 +176,6 @@ void loop() {
         }
     }
 
-    // ==========================================================
-    // AUTO CAPTURE (every interval)
-    // ==========================================================
-
     if (cameraReady && mqttConnected && !captureInProgress) {
         if (now - lastAutoCapture >= autoCaptureInterval) {
             lastAutoCapture = now;
@@ -197,10 +183,6 @@ void loop() {
             captureAndSendImage();
         }
     }
-
-    // ==========================================================
-    // SERIAL COMMANDS
-    // ==========================================================
 
     if (Serial.available()) {
         String cmd = Serial.readStringUntil('\n');
@@ -259,14 +241,13 @@ void initCamera() {
     config.pin_pwdn = PWDN_GPIO_NUM;
     config.pin_reset = RESET_GPIO_NUM;
     config.xclk_freq_hz = 20000000;
-    config.frame_size = FRAMESIZE_UXGA;
+    config.frame_size = FRAMESIZE_QVGA;  // 320x240 - lebih kecil = lebih terang
     config.pixel_format = PIXFORMAT_JPEG;
     config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
     config.fb_location = CAMERA_FB_IN_PSRAM;
-    config.jpeg_quality = 12;
+    config.jpeg_quality = 15;  // 10-63 (rendah = kualitas tinggi)
     config.fb_count = 1;
 
-    // If PSRAM available, use higher quality
     if (config.pixel_format == PIXFORMAT_JPEG) {
         if (psramFound()) {
             config.jpeg_quality = 10;
@@ -285,17 +266,27 @@ void initCamera() {
         return;
     }
 
-    // Sensor settings
+    // ==========================================================
+    // SETTINGS SENSOR - BRIGHTNESS FIX
+    // ==========================================================
+
     sensor_t *s = esp_camera_sensor_get();
+    
+    // Set sensor settings untuk gambar lebih terang
+    s->set_brightness(s, 2);        // 0 = normal, 1-2 = lebih terang
+    s->set_contrast(s, 1);          // Tingkatkan kontras
+    s->set_saturation(s, 1);        // Tingkatkan saturasi
+    s->set_gainceiling(s, GAINCEILING_8X); // Gain tinggi
+    s->set_agc_gain(s, 30);         // Auto gain control (0-30)
+    s->set_aec2(s, 1);              // Auto exposure control
+    s->set_aec_value(s, 500);       // Exposure value (0-1200)
+    s->set_wb_mode(s, 0);           // White balance auto
+    
+    // Flip jika diperlukan
     if (s->id.PID == OV3660_PID) {
         s->set_vflip(s, 1);
-        s->set_brightness(s, 1);
+        s->set_brightness(s, 2);
         s->set_saturation(s, -2);
-    }
-    
-    // Drop down frame size for higher initial frame rate
-    if (config.pixel_format == PIXFORMAT_JPEG) {
-        s->set_framesize(s, FRAMESIZE_QVGA);
     }
 
 #if defined(CAMERA_MODEL_M5STACK_WIDE) || defined(CAMERA_MODEL_M5STACK_ESP32CAM)
@@ -303,13 +294,7 @@ void initCamera() {
     s->set_hmirror(s, 1);
 #endif
 
-#if defined(CAMERA_MODEL_ESP32S3_EYE)
-    s->set_vflip(s, 1);
-#endif
-
-#if defined(LED_GPIO_NUM)
-    setupLedFlash(LED_GPIO_NUM);
-#endif
+    Serial.println("[CAMERA] Settings applied - Brightness increased");
 
     cameraReady = true;
 }
@@ -330,10 +315,23 @@ void captureAndSendImage() {
     publishResponse("CAPTURING");
 
     // ==========================================================
+    // NYALAKAN FLASH LED
+    // ==========================================================
+
+    Serial.println("[CAMERA] Flash ON");
+    digitalWrite(FLASH_LED_PIN, HIGH);
+    delay(300);  // Tunggu 300ms agar flash stabil
+
+    // ==========================================================
     // CAPTURE
     // ==========================================================
 
     camera_fb_t *fb = esp_camera_fb_get();
+    
+    // Matikan flash setelah capture
+    digitalWrite(FLASH_LED_PIN, LOW);
+    Serial.println("[CAMERA] Flash OFF");
+
     if (!fb) {
         Serial.println("[CAMERA] Failed to capture!");
         captureInProgress = false;
@@ -343,16 +341,6 @@ void captureAndSendImage() {
     }
 
     Serial.printf("[CAMERA] Captured! Size: %zu bytes\n", fb->len);
-
-    // ==========================================================
-    // FLASH LED (effect)
-    // ==========================================================
-
-    #if defined(LED_GPIO_NUM)
-    digitalWrite(LED_GPIO_NUM, HIGH);
-    delay(50);
-    digitalWrite(LED_GPIO_NUM, LOW);
-    #endif
 
     // ==========================================================
     // CONVERT TO BASE64
@@ -392,23 +380,18 @@ void captureAndSendImage() {
 
 void sendImageViaMQTT(String base64Image) {
     if (!mqttConnected) return;
-
-    // MQTT message size limit ~ 256KB
-    // Base64 image usually 100-200KB
-    // Send directly if size < 200KB
     
     if (base64Image.length() < 200000) {
         mqttClient.publish(TOPIC_CAMERA_IMAGE, base64Image.c_str());
         Serial.printf("[MQTT] Image sent: %d chars\n", base64Image.length());
     } else {
-        // Split into chunks if too large
         Serial.println("[MQTT] Image too large, splitting...");
         splitAndSendImage(base64Image);
     }
 }
 
 void splitAndSendImage(String base64Image) {
-    const int CHUNK_SIZE = 180000; // 180KB per chunk
+    const int CHUNK_SIZE = 180000;
     int totalChunks = (base64Image.length() + CHUNK_SIZE - 1) / CHUNK_SIZE;
     
     for (int i = 0; i < totalChunks; i++) {
@@ -416,26 +399,21 @@ void splitAndSendImage(String base64Image) {
         int end = min(start + CHUNK_SIZE, (int)base64Image.length());
         String chunk = base64Image.substring(start, end);
         
-        // Send chunk with header: "1/3:base64data..."
         String payload = String(i + 1) + "/" + String(totalChunks) + ":" + chunk;
         mqttClient.publish(TOPIC_CAMERA_IMAGE, payload.c_str());
         
         Serial.printf("[MQTT] Chunk %d/%d sent\n", i + 1, totalChunks);
-        delay(100); // Delay antar chunk
+        delay(100);
     }
 }
 
 // ============================================================
-// WIFI FUNCTIONS (WiFiManager)
+// WIFI FUNCTIONS
 // ============================================================
 
 void setupWiFi() {
     Serial.println("[WIFI] Starting WiFiManager...");
     Serial.println("[WIFI] Jika gagal, buka hotspot 'SmartFarm-CAM'");
-    Serial.println("[WIFI] Password: 12345678");
-
-    // Reset settings - uncomment if needed
-    // wifiManager.resetSettings();
 
     wifiManager.setConfigPortalTimeout(60);
     wifiManager.setConnectTimeout(30);
@@ -446,13 +424,10 @@ void setupWiFi() {
     if (connected) {
         wifiConnected = true;
         Serial.println("[WIFI] ✅ Connected!");
-        Serial.printf("[WIFI] SSID: %s\n", WiFi.SSID().c_str());
         Serial.printf("[WIFI] IP: %s\n", WiFi.localIP().toString().c_str());
-        Serial.printf("[WIFI] RSSI: %d dBm\n", WiFi.RSSI());
     } else {
         wifiConnected = false;
         Serial.println("[WIFI] ❌ Timeout - OFFLINE mode");
-        Serial.println("[WIFI] Restart ESP32 untuk mencoba lagi");
     }
 }
 
@@ -470,23 +445,17 @@ void mqttReconnect() {
     if (mqttClient.connected()) return;
     if (!wifiConnected) return;
 
-    Serial.print("[MQTT] Connecting to ");
-    Serial.print(MQTT_BROKER);
-    Serial.print("...");
-    
+    Serial.print("[MQTT] Connecting...");
     bool ok = mqttClient.connect(MQTT_CLIENT_ID);
 
     if (ok) {
         mqttConnected = true;
         Serial.println(" ✅ Connected!");
 
-        // Subscribe ke topic capture
         mqttClient.subscribe(TOPIC_CAMERA_CAPTURE);
         Serial.println("[MQTT] Subscribed to: " + String(TOPIC_CAMERA_CAPTURE));
 
-        // Publish status
         publishStatus("ONLINE", "Camera ready");
-
     } else {
         mqttConnected = false;
         Serial.printf(" ❌ Failed! rc=%d\n", mqttClient.state());
@@ -502,10 +471,6 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     String msgStr = String(message);
 
     Serial.printf("[MQTT] %s -> %s\n", topic, message);
-
-    // ==========================================================
-    // CAPTURE COMMAND
-    // ==========================================================
 
     if (topicStr == TOPIC_CAMERA_CAPTURE) {
         if (msgStr == "CAPTURE" || msgStr == "1" || msgStr == "ON") {
@@ -525,8 +490,6 @@ void publishStatus(String status, String message) {
     doc["camera_ready"] = cameraReady;
     doc["wifi"] = wifiConnected;
     doc["mqtt"] = mqttConnected;
-    doc["free_heap"] = ESP.getFreeHeap();
-    doc["free_psram"] = ESP.getFreePsram();
 
     char jsonBuffer[256];
     serializeJson(doc, jsonBuffer);
@@ -543,14 +506,12 @@ void publishResponse(String message) {
 // ============================================================
 
 void blinkLED(int times, int duration) {
-    #if defined(LED_GPIO_NUM)
     for (int i = 0; i < times; i++) {
-        digitalWrite(LED_GPIO_NUM, LOW);
+        digitalWrite(FLASH_LED_PIN, HIGH);
         delay(duration);
-        digitalWrite(LED_GPIO_NUM, HIGH);
+        digitalWrite(FLASH_LED_PIN, LOW);
         delay(duration);
     }
-    #endif
 }
 
 void printStatus() {
@@ -560,19 +521,14 @@ void printStatus() {
     Serial.printf("║ Camera      : %s                ║\n", cameraReady ? "READY ✅" : "ERROR ❌");
     Serial.printf("║ WiFi        : %s                ║\n", wifiConnected ? "Connected ✅" : "Offline ❌");
     Serial.printf("║ MQTT        : %s                ║\n", mqttConnected ? "Connected ✅" : "Disconnected ❌");
-    Serial.printf("║ Free Heap   : %6d bytes         ║\n", ESP.getFreeHeap());
-    Serial.printf("║ Free PSRAM  : %6d bytes         ║\n", ESP.getFreePsram());
     Serial.printf("║ Uptime      : %lu s            ║\n", millis() / 1000);
     Serial.println("╠═══════════════════════════════════════╣");
     Serial.printf("║ Web Server  : http://%s    ║\n", WiFi.localIP().toString().c_str());
-    Serial.printf("║ MQTT Broker : %s         ║\n", MQTT_BROKER);
     Serial.println("╚═══════════════════════════════════════╝\n");
 }
 
 // ============================================================
-// WEBSERVER FUNCTIONS (dari library default)
+// WEBSERVER FUNCTIONS (dari library)
 // ============================================================
 
-// Fungsi startCameraServer() dan setupLedFlash() 
-// sudah ada di library ESP32 (app_httpd.cpp)
-// Tidak perlu diimplementasikan ulang
+// startCameraServer() dan setupLedFlash() dari library ESP32
