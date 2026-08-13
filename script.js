@@ -1,38 +1,43 @@
 /* ==========================================================================
-   SMART FARMING IOT DASHBOARD - FULL MQTT INTEGRATION
+   SMART FARMING IOT DASHBOARD - FULL MQTT INTEGRATION v2.1
+   PERBAIKAN: Stabil, Auto-reconnect, Error Handling, Auto-Online Detection
    ========================================================================== */
 
 // ==================== MQTT CONFIGURATION ====================
 const MQTT_CONFIG = {
-    // Untuk HiveMQ Cloud dengan WebSocket Secure
+    // HiveMQ Public Broker (WebSocket Secure)
     broker: 'wss://broker.hivemq.com:8884/mqtt',
-    // Atau jika pakai HiveMQ Cloud berbayar:
+    
+    // Jika pakai HiveMQ Cloud berbayar, uncomment ini:
     // broker: 'wss://YOUR_CLUSTER.s1.eu.hivemq.cloud:8884/mqtt',
     // username: 'YOUR_USERNAME',
     // password: 'YOUR_PASSWORD',
     
     topics: {
-        // Sensor Topics
+        // Sensor Topics (dari ESP32)
         temperature: 'smartfarm/sensor/temperature',
         humidity: 'smartfarm/sensor/humidity',
         soilMoisture: 'smartfarm/sensor/soil_moisture',
         waterLevel: 'smartfarm/sensor/water_level',
         light: 'smartfarm/sensor/light',
         
-        // Actuator Topics
+        // Actuator Topics (dari ESP32)
         pump: 'smartfarm/actuator/pump',
         lamp: 'smartfarm/actuator/lamp',
         buzzer: 'smartfarm/actuator/buzzer',
         
-        // Control Topics
+        // Control Topics (ke ESP32)
         controlPump: 'smartfarm/control/pump',
         controlLamp: 'smartfarm/control/lamp',
         controlBuzzer: 'smartfarm/control/buzzer',
         controlAuto: 'smartfarm/control/auto_mode',
+        controlQuick: 'smartfarm/control/quick_water',
         
-        // Status Topic
+        // Status Topic (dari ESP32)
         status: 'smartfarm/status/esp32',
-        cameraCapture: 'smartfarm/camera/capture'
+        
+        // Feedback (dari ESP32)
+        feedback: 'smartfarm/feedback/#'
     }
 };
 
@@ -44,6 +49,9 @@ const state = {
     soilMoisture: null,
     waterLevel: null,
     light: '--',
+    soilStatus: '--',
+    ldrADC: null,
+    soilADC: null,
     
     // Actuator States
     pump: false,
@@ -51,21 +59,30 @@ const state = {
     buzzer: false,
     
     // System
-    systemStatus: 'OFFLINE',
+    systemStatus: 'ONLINE', // Default ONLINE
     autoMode: true,
+    alarm: false,
     uptime: 0,
     waterUsed: 0,
+    wifiConnected: false,
+    mqttConnected: false,
     
     // MQTT
     connected: false,
     lastUpdate: null,
     messageCount: 0,
+    reconnectAttempts: 0,
+    hasReceivedData: false, // Flag untuk cek apakah pernah terima data
     
     // Chart History
     chartLabels: [],
     chartTempData: [],
     chartSoilData: [],
-    maxChartPoints: 20
+    maxChartPoints: 30,
+    
+    // Quick Water
+    quickWaterActive: false,
+    quickWaterCountdown: 0
 };
 
 // ==================== DOM REFERENCES ====================
@@ -90,10 +107,12 @@ const DOM = {
     valTemperature: document.getElementById('valTemperature'),
     statusTemperature: document.getElementById('statusTemperature'),
     tempTrendText: document.getElementById('tempTrendText'),
+    tempTrend: document.getElementById('tempTrend'),
     
     valHumidity: document.getElementById('valHumidity'),
     statusHumidity: document.getElementById('statusHumidity'),
     humidityTrendText: document.getElementById('humidityTrendText'),
+    humidityTrend: document.getElementById('humidityTrend'),
     
     valSoilMoisture: document.getElementById('valSoilMoisture'),
     barSoilMoisture: document.getElementById('barSoilMoisture'),
@@ -180,10 +199,12 @@ let mqttClient = null;
 let quickWaterTimer = null;
 let chartInstance = null;
 let recentCaptures = [];
+let isConnecting = false;
+let reconnectTimeout = null;
 
 // ==================== INIT ====================
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('🌱 Smart Farming Dashboard v2.0');
+    console.log('🌱 Smart Farming Dashboard v2.1');
     console.log('📡 MQTT Broker:', MQTT_CONFIG.broker);
     console.log('📋 Topics:', MQTT_CONFIG.topics);
     
@@ -196,8 +217,17 @@ document.addEventListener('DOMContentLoaded', () => {
     updateLastTimestamp();
     
     // Set default mode
-    DOM.toggleGlobalAuto.checked = true;
-    state.autoMode = true;
+    if (DOM.toggleGlobalAuto) {
+        DOM.toggleGlobalAuto.checked = true;
+        state.autoMode = true;
+    }
+    
+    // Set initial status
+    state.systemStatus = 'ONLINE';
+    renderAll();
+    
+    // Check connection status periodically
+    setInterval(checkConnectionStatus, 10000);
 });
 
 // ==================== NAVIGATION ====================
@@ -235,28 +265,45 @@ function initNavigation() {
 
 // ==================== MQTT ====================
 function initMQTT() {
+    if (isConnecting) return;
+    isConnecting = true;
+    
     try {
+        // Close existing connection
+        if (mqttClient) {
+            try {
+                mqttClient.end(true);
+            } catch (e) {}
+            mqttClient = null;
+        }
+        
         const clientId = 'dashboard_' + Math.random().toString(16).substr(2, 8);
         
-        // Build connection options
         const options = {
             clientId: clientId,
             clean: true,
             reconnectPeriod: 3000,
-            keepAlive: 60
+            keepAlive: 60,
+            connectTimeout: 10000
         };
         
-        // Add credentials if provided
         if (MQTT_CONFIG.username && MQTT_CONFIG.password) {
             options.username = MQTT_CONFIG.username;
             options.password = MQTT_CONFIG.password;
         }
         
+        console.log('🔄 Connecting to MQTT...');
+        updateConnectionUI('connecting', 'Connecting...', 'Connecting');
+        
         mqttClient = mqtt.connect(MQTT_CONFIG.broker, options);
         
         mqttClient.on('connect', () => {
             console.log('✅ MQTT Connected');
+            isConnecting = false;
             state.connected = true;
+            state.mqttConnected = true;
+            state.reconnectAttempts = 0;
+            
             updateConnectionUI('connected', 'MQTT Connected', 'Online');
             showToast('MQTT Connected successfully!', 'success');
             
@@ -272,7 +319,7 @@ function initMQTT() {
                 });
             });
             
-            // Request status update
+            // Request status
             setTimeout(() => {
                 showToast('📡 Waiting for sensor data...', 'info');
             }, 1000);
@@ -286,14 +333,26 @@ function initMQTT() {
 
         mqttClient.on('error', (err) => {
             console.error('❌ MQTT Error:', err);
+            isConnecting = false;
             state.connected = false;
+            state.mqttConnected = false;
             updateConnectionUI('disconnected', 'MQTT Error', 'Offline');
-            showToast('MQTT Error: ' + err.message, 'warning');
+            showToast('MQTT Error: ' + err.message, 'error');
+            
+            // Auto reconnect after delay
+            if (reconnectTimeout) clearTimeout(reconnectTimeout);
+            reconnectTimeout = setTimeout(() => {
+                if (!state.connected) {
+                    initMQTT();
+                }
+            }, 10000);
         });
 
         mqttClient.on('offline', () => {
             console.log('⚠️ MQTT Offline');
+            isConnecting = false;
             state.connected = false;
+            state.mqttConnected = false;
             updateConnectionUI('disconnected', 'MQTT Offline', 'Offline');
         });
 
@@ -304,10 +363,18 @@ function initMQTT() {
 
     } catch (e) {
         console.error('❌ MQTT Init error:', e);
+        isConnecting = false;
         showToast('MQTT Init error: ' + e.message, 'error');
+        
+        // Retry after delay
+        if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        reconnectTimeout = setTimeout(() => {
+            initMQTT();
+        }, 10000);
     }
 }
 
+// ==================== HANDLE MQTT MESSAGE ====================
 function handleMQTTMessage(topic, payload) {
     const topics = MQTT_CONFIG.topics;
     
@@ -315,8 +382,88 @@ function handleMQTTMessage(topic, payload) {
     state.lastUpdate = new Date();
     updateLastTimestamp();
     state.messageCount++;
+    state.hasReceivedData = true;
     
-    // Parse JSON for status topic
+    // ==========================================================
+    // HANDLE INDIVIDUAL SENSOR TOPICS (tanpa menunggu status JSON)
+    // ==========================================================
+    
+    // Temperature
+    if (topic === topics.temperature) {
+        state.temperature = parseFloat(payload);
+        updateChartData(state.temperature, null);
+        // Auto-set ONLINE jika menerima data
+        if (state.systemStatus === 'OFFLINE' || state.systemStatus === 'SENSOR ERROR') {
+            state.systemStatus = 'ONLINE';
+        }
+        renderAll();
+        return;
+    }
+    
+    // Humidity
+    else if (topic === topics.humidity) {
+        state.humidity = parseFloat(payload);
+        if (state.systemStatus === 'OFFLINE' || state.systemStatus === 'SENSOR ERROR') {
+            state.systemStatus = 'ONLINE';
+        }
+        renderAll();
+        return;
+    }
+    
+    // Soil Moisture
+    else if (topic === topics.soilMoisture) {
+        state.soilMoisture = parseInt(payload);
+        updateChartData(null, state.soilMoisture);
+        if (state.systemStatus === 'OFFLINE' || state.systemStatus === 'SENSOR ERROR') {
+            state.systemStatus = 'ONLINE';
+        }
+        renderAll();
+        return;
+    }
+    
+    // Water Level
+    else if (topic === topics.waterLevel) {
+        state.waterLevel = parseInt(payload);
+        if (state.systemStatus === 'OFFLINE' || state.systemStatus === 'SENSOR ERROR') {
+            state.systemStatus = 'ONLINE';
+        }
+        renderAll();
+        return;
+    }
+    
+    // Light Status
+    else if (topic === topics.light) {
+        state.light = payload;
+        if (state.systemStatus === 'OFFLINE' || state.systemStatus === 'SENSOR ERROR') {
+            state.systemStatus = 'ONLINE';
+        }
+        renderAll();
+        return;
+    }
+    
+    // Actuator States
+    else if (topic === topics.pump) {
+        state.pump = payload === 'ON';
+        syncPumpToggle();
+        renderAll();
+        return;
+    }
+    else if (topic === topics.lamp) {
+        state.lamp = payload === 'ON';
+        syncLampToggle();
+        renderAll();
+        return;
+    }
+    else if (topic === topics.buzzer) {
+        state.buzzer = payload === 'ON';
+        renderAll();
+        return;
+    }
+    
+    // ==========================================================
+    // PARSE JSON STATUS (jika ada)
+    // ==========================================================
+    
     if (topic === topics.status) {
         try {
             const data = JSON.parse(payload);
@@ -326,15 +473,21 @@ function handleMQTTMessage(topic, payload) {
             if (data.temperature !== undefined) state.temperature = data.temperature;
             if (data.humidity !== undefined) state.humidity = data.humidity;
             if (data.soil_moisture !== undefined) state.soilMoisture = data.soil_moisture;
+            if (data.soil_status !== undefined) state.soilStatus = data.soil_status;
             if (data.water_level !== undefined) state.waterLevel = data.water_level;
             if (data.light !== undefined) state.light = data.light;
+            if (data.ldr_adc !== undefined) state.ldrADC = data.ldr_adc;
+            if (data.soil_adc !== undefined) state.soilADC = data.soil_adc;
             if (data.pump !== undefined) state.pump = data.pump === 'ON';
             if (data.lamp !== undefined) state.lamp = data.lamp === 'ON';
             if (data.buzzer !== undefined) state.buzzer = data.buzzer === 'ON';
             if (data.mode !== undefined) state.autoMode = data.mode === 'AUTO';
             if (data.status !== undefined) state.systemStatus = data.status;
+            if (data.alarm !== undefined) state.alarm = data.alarm;
             if (data.uptime !== undefined) state.uptime = data.uptime;
             if (data.water_used !== undefined) state.waterUsed = data.water_used;
+            if (data.wifi !== undefined) state.wifiConnected = data.wifi;
+            if (data.mqtt !== undefined) state.mqttConnected = data.mqtt;
             
             // Update UI
             renderAll();
@@ -344,40 +497,34 @@ function handleMQTTMessage(topic, payload) {
         }
     }
     
-    // Handle individual sensor topics
-    if (topic === topics.temperature) {
-        state.temperature = parseFloat(payload);
-        updateChartData(state.temperature, null);
+    // ==========================================================
+    // HANDLE FEEDBACK TOPICS
+    // ==========================================================
+    
+    if (topic === 'smartfarm/feedback/pump') {
+        showToast('💧 Pump feedback: ' + payload, payload === 'SAFETY_BLOCKED' ? 'warning' : 'info');
+        return;
     }
-    else if (topic === topics.humidity) {
-        state.humidity = parseFloat(payload);
+    else if (topic === 'smartfarm/feedback/lamp') {
+        showToast('💡 Lamp feedback: ' + payload, 'info');
+        return;
     }
-    else if (topic === topics.soilMoisture) {
-        state.soilMoisture = parseInt(payload);
-        updateChartData(null, state.soilMoisture);
-    }
-    else if (topic === topics.waterLevel) {
-        state.waterLevel = parseInt(payload);
-    }
-    else if (topic === topics.light) {
-        state.light = payload;
-    }
-    else if (topic === topics.pump) {
-        state.pump = payload === 'ON';
-        syncPumpToggle();
-    }
-    else if (topic === topics.lamp) {
-        state.lamp = payload === 'ON';
-        syncLampToggle();
-    }
-    else if (topic === topics.buzzer) {
-        state.buzzer = payload === 'ON';
+    else if (topic === 'smartfarm/feedback/quick_water') {
+        if (payload === 'STARTED') {
+            showToast('⏱️ Quick water started!', 'success');
+        } else if (payload === 'SAFETY_BLOCKED') {
+            showToast('⛔ Quick water blocked - water level critical!', 'warning');
+        } else {
+            showToast('⏱️ Quick water: ' + payload, 'info');
+        }
+        return;
     }
     
-    // Render UI
+    // Render UI jika ada perubahan
     renderAll();
 }
 
+// ==================== PUBLISH CONTROL ====================
 function publishControl(topic, value) {
     if (!state.connected || !mqttClient) {
         showToast('MQTT not connected!', 'warning');
@@ -392,6 +539,14 @@ function publishControl(topic, value) {
         console.error('❌ Publish error:', e);
         showToast('Failed to publish: ' + e.message, 'error');
         return false;
+    }
+}
+
+// ==================== CONNECTION CHECK ====================
+function checkConnectionStatus() {
+    if (!state.connected && !isConnecting) {
+        console.log('🔄 Connection lost, reconnecting...');
+        initMQTT();
     }
 }
 
@@ -419,42 +574,178 @@ function updateConnectionUI(status, title, sub) {
 }
 
 function renderSystemStatus() {
+    // Jika sudah menerima data, set status ONLINE
+    if (state.hasReceivedData && state.systemStatus === 'OFFLINE') {
+        state.systemStatus = 'ONLINE';
+    }
+    
     const isOnline = state.systemStatus === 'ONLINE' || state.systemStatus === 'NORMAL';
+    const isWarning = state.systemStatus === 'WARNING';
+    const isSensorError = state.systemStatus === 'SENSOR ERROR';
     
     // System Status Card
     if (DOM.sysStatusDot) {
-        DOM.sysStatusDot.className = `status-dot-lg ${isOnline ? 'online' : 'offline'}`;
+        if (isOnline) {
+            DOM.sysStatusDot.className = 'status-dot-lg online';
+        } else if (isWarning) {
+            DOM.sysStatusDot.className = 'status-dot-lg warning';
+            DOM.sysStatusDot.style.backgroundColor = 'var(--accent-amber)';
+            DOM.sysStatusDot.style.boxShadow = '0 0 12px var(--accent-amber)';
+        } else if (isSensorError) {
+            DOM.sysStatusDot.className = 'status-dot-lg offline';
+            DOM.sysStatusDot.style.backgroundColor = 'var(--accent-red)';
+            DOM.sysStatusDot.style.boxShadow = '0 0 12px var(--accent-red)';
+        } else {
+            DOM.sysStatusDot.className = 'status-dot-lg offline';
+            DOM.sysStatusDot.style.backgroundColor = 'var(--accent-red)';
+            DOM.sysStatusDot.style.boxShadow = '0 0 12px var(--accent-red)';
+        }
     }
+    
     if (DOM.sysStatusText) {
-        DOM.sysStatusText.textContent = isOnline ? 'ONLINE' : 'OFFLINE';
-        DOM.sysStatusText.style.color = isOnline ? 'var(--accent-green)' : 'var(--accent-red)';
+        if (isOnline) {
+            DOM.sysStatusText.textContent = 'ONLINE';
+            DOM.sysStatusText.style.color = 'var(--accent-green)';
+        } else if (isWarning) {
+            DOM.sysStatusText.textContent = 'WARNING';
+            DOM.sysStatusText.style.color = 'var(--accent-amber)';
+        } else if (isSensorError) {
+            DOM.sysStatusText.textContent = 'SENSOR ERROR';
+            DOM.sysStatusText.style.color = 'var(--accent-red)';
+        } else {
+            DOM.sysStatusText.textContent = 'OFFLINE';
+            DOM.sysStatusText.style.color = 'var(--accent-red)';
+        }
     }
+    
     if (DOM.sysStatusSub) {
-        DOM.sysStatusSub.textContent = isOnline ? 'All systems operating normally' : 'Connection lost with MCU';
+        if (isOnline) {
+            DOM.sysStatusSub.textContent = 'All systems operating normally';
+        } else if (isWarning) {
+            DOM.sysStatusSub.textContent = '⚠️ Water level critical!';
+        } else if (isSensorError) {
+            DOM.sysStatusSub.textContent = '⚠️ Sensor error detected!';
+        } else {
+            DOM.sysStatusSub.textContent = 'Connection lost with MCU';
+        }
     }
+    
     if (DOM.sysStatusBadge) {
-        DOM.sysStatusBadge.textContent = isOnline ? 'NORMAL' : 'ALERT';
-        DOM.sysStatusBadge.className = `badge ${isOnline ? 'badge-success' : 'badge-off'}`;
+        if (isOnline) {
+            DOM.sysStatusBadge.textContent = 'NORMAL';
+            DOM.sysStatusBadge.className = 'badge badge-success';
+            DOM.sysStatusBadge.style.borderColor = '';
+            DOM.sysStatusBadge.style.color = '';
+        } else if (isWarning) {
+            DOM.sysStatusBadge.textContent = 'WARNING';
+            DOM.sysStatusBadge.className = 'badge badge-off';
+            DOM.sysStatusBadge.style.borderColor = 'var(--accent-amber)';
+            DOM.sysStatusBadge.style.color = 'var(--accent-amber)';
+        } else if (isSensorError) {
+            DOM.sysStatusBadge.textContent = 'SENSOR ERROR';
+            DOM.sysStatusBadge.className = 'badge badge-off';
+            DOM.sysStatusBadge.style.borderColor = 'var(--accent-red)';
+            DOM.sysStatusBadge.style.color = 'var(--accent-red)';
+        } else {
+            DOM.sysStatusBadge.textContent = 'ALERT';
+            DOM.sysStatusBadge.className = 'badge badge-off';
+            DOM.sysStatusBadge.style.borderColor = '';
+            DOM.sysStatusBadge.style.color = '';
+        }
     }
     
     // Header Status
     if (DOM.headerSystemStatus) {
-        DOM.headerSystemStatus.textContent = `SYSTEM ${isOnline ? 'ONLINE' : 'OFFLINE'}`;
+        if (isOnline) {
+            DOM.headerSystemStatus.textContent = 'SYSTEM ONLINE';
+        } else if (isWarning) {
+            DOM.headerSystemStatus.textContent = 'SYSTEM WARNING';
+        } else if (isSensorError) {
+            DOM.headerSystemStatus.textContent = 'SENSOR ERROR';
+        } else {
+            DOM.headerSystemStatus.textContent = 'SYSTEM OFFLINE';
+        }
     }
+    
     if (DOM.headerStatusPill) {
-        DOM.headerStatusPill.className = `status-pill ${isOnline ? 'online' : 'offline'}`;
+        if (isOnline) {
+            DOM.headerStatusPill.className = 'status-pill online';
+            DOM.headerStatusPill.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+            DOM.headerStatusPill.style.color = 'var(--accent-green)';
+        } else if (isWarning) {
+            DOM.headerStatusPill.className = 'status-pill warning';
+            DOM.headerStatusPill.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+            DOM.headerStatusPill.style.color = 'var(--accent-amber)';
+        } else {
+            DOM.headerStatusPill.className = 'status-pill offline';
+            DOM.headerStatusPill.style.borderColor = 'rgba(239, 68, 68, 0.3)';
+            DOM.headerStatusPill.style.color = 'var(--accent-red)';
+        }
+    }
+    
+    if (DOM.headerStatusDot) {
+        DOM.headerStatusDot.className = `pulse-dot ${isOnline ? '' : 'offline'}`;
+        if (isWarning) {
+            DOM.headerStatusDot.style.backgroundColor = 'var(--accent-amber)';
+            DOM.headerStatusDot.style.boxShadow = '0 0 8px var(--accent-amber)';
+        } else if (isOnline) {
+            DOM.headerStatusDot.style.backgroundColor = 'var(--accent-green)';
+            DOM.headerStatusDot.style.boxShadow = '0 0 8px var(--accent-green)';
+        } else {
+            DOM.headerStatusDot.style.backgroundColor = 'var(--accent-red)';
+            DOM.headerStatusDot.style.boxShadow = '0 0 8px var(--accent-red)';
+        }
     }
     
     // Dot System
     if (DOM.dotSystem) {
-        DOM.dotSystem.className = `state-dot ${isOnline ? 'on' : 'off'}`;
+        DOM.dotSystem.className = `state-dot ${isOnline ? 'on' : isWarning ? 'warning' : 'off'}`;
+        if (isWarning) {
+            DOM.dotSystem.style.backgroundColor = 'var(--accent-amber)';
+            DOM.dotSystem.style.boxShadow = '0 0 8px var(--accent-amber)';
+        } else if (isOnline) {
+            DOM.dotSystem.style.backgroundColor = 'var(--accent-green)';
+            DOM.dotSystem.style.boxShadow = '0 0 8px var(--accent-green)';
+        } else {
+            DOM.dotSystem.style.backgroundColor = 'var(--text-dim)';
+            DOM.dotSystem.style.boxShadow = 'none';
+        }
     }
+    
     if (DOM.stateSystem) {
-        DOM.stateSystem.textContent = isOnline ? 'NORMAL' : 'OFFLINE';
-        DOM.stateSystem.className = `state-text ${isOnline ? 'active' : ''}`;
+        if (isOnline) {
+            DOM.stateSystem.textContent = 'NORMAL';
+            DOM.stateSystem.className = 'state-text active';
+            DOM.stateSystem.style.color = 'var(--accent-green)';
+        } else if (isWarning) {
+            DOM.stateSystem.textContent = 'WARNING';
+            DOM.stateSystem.className = 'state-text active';
+            DOM.stateSystem.style.color = 'var(--accent-amber)';
+        } else if (isSensorError) {
+            DOM.stateSystem.textContent = 'SENSOR ERROR';
+            DOM.stateSystem.className = 'state-text';
+            DOM.stateSystem.style.color = 'var(--accent-red)';
+        } else {
+            DOM.stateSystem.textContent = 'OFFLINE';
+            DOM.stateSystem.className = 'state-text';
+            DOM.stateSystem.style.color = 'var(--text-muted)';
+        }
     }
+    
     if (DOM.systemMCUStatus) {
-        DOM.systemMCUStatus.textContent = isOnline ? 'ESP32 Status OK' : 'ESP32 Offline';
+        if (isOnline) {
+            DOM.systemMCUStatus.textContent = 'ESP32 Status OK';
+            DOM.systemMCUStatus.style.color = 'var(--text-muted)';
+        } else if (isWarning) {
+            DOM.systemMCUStatus.textContent = '⚠️ Water Critical!';
+            DOM.systemMCUStatus.style.color = 'var(--accent-amber)';
+        } else if (isSensorError) {
+            DOM.systemMCUStatus.textContent = '⚠️ Sensor Error!';
+            DOM.systemMCUStatus.style.color = 'var(--accent-red)';
+        } else {
+            DOM.systemMCUStatus.textContent = 'ESP32 Offline';
+            DOM.systemMCUStatus.style.color = 'var(--text-dim)';
+        }
     }
 }
 
@@ -490,6 +781,28 @@ function renderSensorCards() {
     if (DOM.valHumidity) {
         DOM.valHumidity.textContent = state.humidity !== null ? Math.round(state.humidity) : '--';
     }
+    if (DOM.statusHumidity) {
+        const hum = state.humidity;
+        if (hum === null) {
+            DOM.statusHumidity.textContent = '--';
+            DOM.statusHumidity.className = 'badge badge-off';
+        } else if (hum < 40) {
+            DOM.statusHumidity.textContent = 'Low';
+            DOM.statusHumidity.className = 'badge badge-off';
+            DOM.statusHumidity.style.borderColor = 'var(--accent-amber)';
+            DOM.statusHumidity.style.color = 'var(--accent-amber)';
+        } else if (hum > 80) {
+            DOM.statusHumidity.textContent = 'High';
+            DOM.statusHumidity.className = 'badge badge-off';
+            DOM.statusHumidity.style.borderColor = 'var(--accent-blue)';
+            DOM.statusHumidity.style.color = 'var(--accent-blue)';
+        } else {
+            DOM.statusHumidity.textContent = 'Normal';
+            DOM.statusHumidity.className = 'badge badge-outline-success';
+            DOM.statusHumidity.style.borderColor = '';
+            DOM.statusHumidity.style.color = '';
+        }
+    }
     
     // Soil Moisture
     if (DOM.valSoilMoisture) {
@@ -504,34 +817,42 @@ function renderSensorCards() {
         if (val === null) {
             DOM.statusSoilMoisture.textContent = '--';
         } else if (val < 30) {
-            DOM.statusSoilMoisture.textContent = 'Moisture Level: Dry (Watering Needed)';
+            DOM.statusSoilMoisture.textContent = '🌵 Dry (Watering Needed)';
             DOM.statusSoilMoisture.style.color = 'var(--accent-amber)';
         } else if (val > 80) {
-            DOM.statusSoilMoisture.textContent = 'Moisture Level: Wet';
+            DOM.statusSoilMoisture.textContent = '💦 Wet';
             DOM.statusSoilMoisture.style.color = 'var(--accent-blue)';
         } else {
-            DOM.statusSoilMoisture.textContent = 'Moisture Level: Good';
+            DOM.statusSoilMoisture.textContent = '🌱 Good';
             DOM.statusSoilMoisture.style.color = 'var(--text-muted)';
         }
     }
     
     // Water Level
     if (DOM.valWaterLevel) {
-        DOM.valWaterLevel.textContent = state.waterLevel !== null ? Math.round(state.waterLevel) : '--';
+        if (state.waterLevel !== null && state.waterLevel >= 0) {
+            DOM.valWaterLevel.textContent = Math.round(state.waterLevel);
+        } else {
+            DOM.valWaterLevel.textContent = 'ERR';
+        }
     }
     if (DOM.barWaterLevel) {
-        const val = state.waterLevel !== null ? Math.min(100, Math.max(0, state.waterLevel)) : 0;
+        const val = state.waterLevel !== null && state.waterLevel >= 0 ? Math.min(100, Math.max(0, state.waterLevel)) : 0;
         DOM.barWaterLevel.style.width = `${val}%`;
     }
     if (DOM.statusWaterLevel) {
         const val = state.waterLevel;
-        if (val === null) {
-            DOM.statusWaterLevel.textContent = '--';
-        } else if (val < 20) {
-            DOM.statusWaterLevel.textContent = 'Water Level: Low Alert!';
+        if (val === null || val < 0) {
+            DOM.statusWaterLevel.textContent = '⚠️ Sensor Error!';
             DOM.statusWaterLevel.style.color = 'var(--accent-red)';
+        } else if (val < 20) {
+            DOM.statusWaterLevel.textContent = '🔴 Critical! Water Low';
+            DOM.statusWaterLevel.style.color = 'var(--accent-red)';
+        } else if (val < 40) {
+            DOM.statusWaterLevel.textContent = '🟡 Low Water';
+            DOM.statusWaterLevel.style.color = 'var(--accent-amber)';
         } else {
-            DOM.statusWaterLevel.textContent = 'Water Level: Good';
+            DOM.statusWaterLevel.textContent = '✅ Good';
             DOM.statusWaterLevel.style.color = 'var(--text-muted)';
         }
     }
@@ -551,7 +872,7 @@ function renderEnvironmentSummary() {
         DOM.envSoil.textContent = state.soilMoisture !== null ? `${Math.round(state.soilMoisture)} %` : '-- %';
     }
     if (DOM.envWater) {
-        DOM.envWater.textContent = state.waterLevel !== null ? `${Math.round(state.waterLevel)} %` : '-- %';
+        DOM.envWater.textContent = state.waterLevel !== null && state.waterLevel >= 0 ? `${Math.round(state.waterLevel)} %` : 'ERR';
     }
 }
 
@@ -669,9 +990,8 @@ function initChart() {
 
     const ctx = canvas.getContext('2d');
     
-    // Initialize with empty data
-    const initialLabels = Array(20).fill('--');
-    const initialData = Array(20).fill(0);
+    const initialLabels = Array(30).fill('--');
+    const initialData = Array(30).fill(0);
     
     chartInstance = new Chart(ctx, {
         type: 'line',
@@ -685,7 +1005,7 @@ function initChart() {
                 fill: true,
                 tension: 0.4,
                 borderWidth: 2,
-                pointRadius: 3,
+                pointRadius: 2,
                 pointBackgroundColor: '#10b981',
                 pointHoverRadius: 5
             }, {
@@ -696,7 +1016,7 @@ function initChart() {
                 fill: true,
                 tension: 0.4,
                 borderWidth: 2,
-                pointRadius: 3,
+                pointRadius: 2,
                 pointBackgroundColor: '#38bdf8',
                 pointHoverRadius: 5,
                 hidden: true
@@ -785,7 +1105,6 @@ function initChart() {
         });
     });
     
-    // Initialize with temp view
     chartInstance.data.datasets[1].hidden = true;
     chartInstance.update();
 }
@@ -797,7 +1116,6 @@ function updateChartData(temp, soil) {
     const label = now.getHours().toString().padStart(2, '0') + ':' + 
                   now.getMinutes().toString().padStart(2, '0');
     
-    // Add new data point
     if (state.chartLabels.length >= state.maxChartPoints) {
         state.chartLabels.shift();
         state.chartTempData.shift();
@@ -808,7 +1126,6 @@ function updateChartData(temp, soil) {
     if (temp !== null) state.chartTempData.push(temp);
     if (soil !== null) state.chartSoilData.push(soil);
     
-    // Update chart
     chartInstance.data.labels = state.chartLabels;
     chartInstance.data.datasets[0].data = state.chartTempData;
     chartInstance.data.datasets[1].data = state.chartSoilData;
@@ -823,13 +1140,15 @@ function initManualControls() {
             toggle.addEventListener('change', (e) => {
                 const value = e.target.checked ? 'ON' : 'OFF';
                 if (publishControl(MQTT_CONFIG.topics.controlPump, value)) {
-                    // If in auto mode, disable it
                     if (state.autoMode) {
                         state.autoMode = false;
                         publishControl(MQTT_CONFIG.topics.controlAuto, 'OFF');
                         renderAll();
                         showToast('Mode Otomatis dinonaktifkan (manual override)', 'info');
                     }
+                } else {
+                    // Revert if publish failed
+                    e.target.checked = !e.target.checked;
                 }
             });
         }
@@ -847,6 +1166,8 @@ function initManualControls() {
                         renderAll();
                         showToast('Mode Otomatis dinonaktifkan (manual override)', 'info');
                     }
+                } else {
+                    e.target.checked = !e.target.checked;
                 }
             });
         }
@@ -856,32 +1177,49 @@ function initManualControls() {
     if (DOM.toggleBuzzerManual) {
         DOM.toggleBuzzerManual.addEventListener('change', (e) => {
             const value = e.target.checked ? 'ON' : 'OFF';
-            publishControl(MQTT_CONFIG.topics.controlBuzzer, value);
+            if (!publishControl(MQTT_CONFIG.topics.controlBuzzer, value)) {
+                e.target.checked = !e.target.checked;
+            }
         });
     }
     
     // Quick Water
     if (DOM.btnQuickWater) {
         DOM.btnQuickWater.addEventListener('click', () => {
-            if (quickWaterTimer) {
-                clearInterval(quickWaterTimer);
-                quickWaterTimer = null;
+            if (state.quickWaterActive) {
+                // Cancel quick water
+                state.quickWaterActive = false;
+                if (quickWaterTimer) {
+                    clearInterval(quickWaterTimer);
+                    quickWaterTimer = null;
+                }
                 publishControl(MQTT_CONFIG.topics.controlPump, 'OFF');
                 if (DOM.labelQuickWater) DOM.labelQuickWater.textContent = '💦 Siram Cepat (5 Detik)';
                 showToast('⏹️ Penyiraman manual dihentikan.', 'info');
                 return;
             }
             
-            let countdown = 5;
-            if (publishControl(MQTT_CONFIG.topics.controlPump, 'ON')) {
+            // Check water safety
+            if (state.waterLevel !== null && state.waterLevel <= 20) {
+                showToast('⚠️ Water level critical! Cannot start watering.', 'warning');
+                return;
+            }
+            
+            const duration = 5;
+            if (publishControl(MQTT_CONFIG.topics.controlQuick, String(duration))) {
+                state.quickWaterActive = true;
+                
                 if (state.autoMode) {
                     state.autoMode = false;
                     publishControl(MQTT_CONFIG.topics.controlAuto, 'OFF');
                     renderAll();
                 }
-                showToast('💦 Siram Cepat 5 Detik dimulai...', 'info');
-                if (DOM.labelQuickWater) DOM.labelQuickWater.textContent = `⏳ Menyiram... (${countdown}s)`;
                 
+                let countdown = duration;
+                if (DOM.labelQuickWater) DOM.labelQuickWater.textContent = `⏳ Menyiram... (${countdown}s)`;
+                showToast(`💦 Siram Cepat ${duration} Detik dimulai...`, 'info');
+                
+                if (quickWaterTimer) clearInterval(quickWaterTimer);
                 quickWaterTimer = setInterval(() => {
                     countdown--;
                     if (countdown > 0) {
@@ -889,9 +1227,9 @@ function initManualControls() {
                     } else {
                         clearInterval(quickWaterTimer);
                         quickWaterTimer = null;
-                        publishControl(MQTT_CONFIG.topics.controlPump, 'OFF');
+                        state.quickWaterActive = false;
                         if (DOM.labelQuickWater) DOM.labelQuickWater.textContent = '💦 Siram Cepat (5 Detik)';
-                        showToast('✅ Penyiraman manual 5 detik telah selesai!', 'success');
+                        showToast('✅ Penyiraman manual selesai!', 'success');
                     }
                 }, 1000);
             }
@@ -922,6 +1260,9 @@ function initManualControls() {
             if (publishControl(MQTT_CONFIG.topics.controlAuto, value)) {
                 renderAll();
                 showToast(state.autoMode ? '🤖 Mode Otomatis Diaktifkan' : '🖐️ Mode Manual Diaktifkan', 'info');
+            } else {
+                e.target.checked = !e.target.checked;
+                state.autoMode = e.target.checked;
             }
         });
     }
@@ -933,11 +1274,12 @@ function initReconnectButton() {
         DOM.btnReconnectMQTT.addEventListener('click', () => {
             showToast('🔄 Reconnecting MQTT...', 'info');
             if (mqttClient) {
-                mqttClient.end();
-                setTimeout(initMQTT, 1000);
-            } else {
-                initMQTT();
+                mqttClient.end(true);
             }
+            if (reconnectTimeout) clearTimeout(reconnectTimeout);
+            setTimeout(() => {
+                initMQTT();
+            }, 1000);
         });
     }
 }
@@ -968,39 +1310,32 @@ function initCameraModule() {
 }
 
 function captureImage() {
-    // Show loading
     DOM.cameraLoading.classList.remove('hidden');
     DOM.cameraPlaceholder.classList.add('hidden');
     DOM.cameraCanvas.classList.add('hidden');
     if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = true;
     
-    // Publish camera capture command via MQTT
     const published = publishControl(MQTT_CONFIG.topics.cameraCapture, 'CAPTURE');
     
     if (!published) {
-        // Fallback: Simulate capture if MQTT not connected
         simulateCapture();
         return;
     }
     
-    // Wait for response (simulated)
     setTimeout(() => {
         simulateCapture();
     }, 1500);
 }
 
 function simulateCapture() {
-    // Hide loading
     DOM.cameraLoading.classList.add('hidden');
     if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
     
-    // Render simulated image
     const canvas = DOM.cameraCanvas;
     const ctx = canvas.getContext('2d');
     const w = canvas.width;
     const h = canvas.height;
     
-    // Background
     const bgGrad = ctx.createLinearGradient(0, 0, w, h);
     bgGrad.addColorStop(0, '#0f172a');
     bgGrad.addColorStop(0.5, '#064e3b');
@@ -1008,13 +1343,11 @@ function simulateCapture() {
     ctx.fillStyle = bgGrad;
     ctx.fillRect(0, 0, w, h);
     
-    // Soil
     ctx.fillStyle = '#1c1917';
     ctx.beginPath();
     ctx.ellipse(w / 2, h - 40, w / 3, 40, 0, 0, Math.PI * 2);
     ctx.fill();
     
-    // Plant Stem
     ctx.strokeStyle = '#22c55e';
     ctx.lineWidth = 12;
     ctx.lineCap = 'round';
@@ -1023,7 +1356,6 @@ function simulateCapture() {
     ctx.quadraticCurveTo(w / 2 - 30, h / 2 + 20, w / 2, 90);
     ctx.stroke();
     
-    // Leaves
     const drawLeaf = (cx, cy, rx, ry, angle, color) => {
         ctx.save();
         ctx.translate(cx, cy);
@@ -1041,26 +1373,22 @@ function simulateCapture() {
     drawLeaf(w / 2 + 45, h / 2 - 100, 55, 22, 35, '#15803d');
     drawLeaf(w / 2, 70, 45, 20, 0, '#86efac');
     
-    // Fruits
     ctx.fillStyle = '#ef4444';
     ctx.beginPath();
     ctx.arc(w / 2 + 30, h / 2 + 10, 16, 0, Math.PI * 2);
     ctx.arc(w / 2 - 25, h / 2 - 40, 14, 0, Math.PI * 2);
     ctx.fill();
     
-    // HUD Overlay
     const margin = 20;
     ctx.strokeStyle = 'rgba(16, 185, 129, 0.4)';
     ctx.lineWidth = 1.5;
     
-    // Corner brackets
     const bSize = 24;
     ctx.beginPath(); ctx.moveTo(margin, margin + bSize); ctx.lineTo(margin, margin); ctx.lineTo(margin + bSize, margin); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(w - margin - bSize, margin); ctx.lineTo(w - margin, margin); ctx.lineTo(w - margin, margin + bSize); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(margin, h - margin - bSize); ctx.lineTo(margin, h - margin); ctx.lineTo(margin + bSize, h - margin); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(w - margin - bSize, h - margin); ctx.lineTo(w - margin, h - margin); ctx.lineTo(w - margin, h - margin - bSize); ctx.stroke();
     
-    // Info
     ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
     ctx.fillRect(margin + 10, margin + 10, 220, 55);
     ctx.strokeStyle = 'rgba(16, 185, 129, 0.5)';
@@ -1073,11 +1401,9 @@ function simulateCapture() {
     ctx.fillText(`TIME: ${timeStr}`, margin + 20, margin + 44);
     ctx.fillText(`TEMP: ${state.temperature || '--'}°C  SOIL: ${state.soilMoisture || '--'}%`, margin + 20, margin + 58);
     
-    // Show canvas
     canvas.classList.remove('hidden');
     DOM.cameraPlaceholder.classList.add('hidden');
     
-    // Add to gallery
     const dataUrl = canvas.toDataURL('image/png');
     addRecentCapture({
         id: Date.now(),
@@ -1134,7 +1460,6 @@ function renderRecentCaptures() {
         </div>
     `).join('');
     
-    // Attach click listeners
     const items = gallery.querySelectorAll('.gallery-item');
     items.forEach(item => {
         item.addEventListener('click', () => {
@@ -1175,6 +1500,7 @@ function showToast(message, type = 'info') {
     if (type === 'warning') icon = '⚠️';
     if (type === 'success') icon = '✅';
     if (type === 'error') icon = '❌';
+    if (type === 'info') icon = '📡';
     
     toast.innerHTML = `
         <span class="toast-icon">${icon}</span>
@@ -1201,7 +1527,8 @@ window.debug = {
     DOM: DOM,
     recentCaptures: recentCaptures,
     publishControl: publishControl,
-    showToast: showToast
+    showToast: showToast,
+    initMQTT: initMQTT
 };
 
 console.log('🔧 Debug: Type "debug" in console to see state');
