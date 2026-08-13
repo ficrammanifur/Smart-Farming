@@ -114,7 +114,7 @@ Smart-Farming/
 ### 1. Overall System Architecture
 
 ```mermaid
-flowchart TD
+flowchart TB
     subgraph Hardware["🌱 Hardware Layer"]
         ESP32["ESP32 Main MCU<br>(Sensors: DHT22, Soil, LDR, Ultrasonic)"]
         ESPCAM["ESP32-CAM Module<br>(Camera + Flash LED)"]
@@ -134,13 +134,14 @@ flowchart TD
     ESP32 -->|Publish: smartfarm/sensor/*| BROKER
     ESPCAM -->|Publish: smartfarm/camera/status| BROKER
     BROKER -->|Subscribe: smartfarm/#| WSS
-    WSS -->|updateState()| STATE
+    WSS -->|updateState| STATE
     STATE -->|Render| UI
     UI -->|Publish: smartfarm/control/*| BROKER
     BROKER -->|Subscribe: smartfarm/control/*| ESP32
     UI -->|HTTP GET /capture| ESPCAM
-    ESPCAM -->|HTTP Response (JPEG)| UI
-    ACTUATORS <-->|GPIO Control| ESP32
+    ESPCAM -->|HTTP Response JPEG| UI
+    ACTUATORS -->|GPIO Control| ESP32
+    ESP32 -->|GPIO Status| ACTUATORS
 ```
 
 ---
