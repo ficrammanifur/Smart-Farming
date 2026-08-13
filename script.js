@@ -1,6 +1,6 @@
 /* ==========================================================================
    SMART FARMING IOT DASHBOARD - FULL MQTT INTEGRATION v2.1
-   DENGAN ESP32-CAM SUPPORT - FIXED DISPLAY
+   DENGAN ESP32-CAM SUPPORT - HTTP IMAGE
    ========================================================================== */
 
 // ==================== MQTT CONFIGURATION ====================
@@ -41,7 +41,6 @@ const MQTT_CONFIG = {
         
         // Camera Topics
         cameraCapture: 'smartfarm/camera/capture',
-        cameraImage: 'smartfarm/camera/image',
         cameraResponse: 'smartfarm/camera/response',
         cameraStatus: 'smartfarm/camera/status'
     }
@@ -88,7 +87,10 @@ const state = {
     
     // Quick Water
     quickWaterActive: false,
-    quickWaterCountdown: 0
+    quickWaterCountdown: 0,
+    
+    // ESP32-CAM IP
+    espCamIP: '192.168.0.21' // Ganti dengan IP ESP32-CAM kamu
 };
 
 // ==================== DOM REFERENCES ====================
@@ -208,15 +210,12 @@ let recentCaptures = [];
 let isConnecting = false;
 let reconnectTimeout = null;
 
-// ==================== CAMERA IMAGE CHUNK HANDLER ====================
-let imageChunks = {};
-let imageChunkTotal = 0;
-
 // ==================== INIT ====================
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🌱 Smart Farming Dashboard v2.1');
     console.log('📡 MQTT Broker:', MQTT_CONFIG.broker);
     console.log('📋 Topics:', MQTT_CONFIG.topics);
+    console.log('📷 ESP32-CAM IP:', state.espCamIP);
     
     initNavigation();
     initChart();
@@ -513,25 +512,8 @@ function handleMQTTMessage(topic, payload) {
     }
     
     // ==========================================================
-    // HANDLE CAMERA IMAGE - FIXED
+    // HANDLE CAMERA RESPONSE
     // ==========================================================
-    
-    if (topic === topics.cameraImage) {
-        console.log('📸 Camera image received!');
-        console.log('📸 Payload length:', payload.length);
-        console.log('📸 First 50 chars:', payload.substring(0, 50));
-        console.log('📸 Last 50 chars:', payload.substring(payload.length - 50));
-        
-        // Cek apakah ini chunk atau full image
-        if (payload.includes(':/')) {
-            console.log('📸 Detected as chunk');
-            handleImageChunk(payload);
-        } else {
-            console.log('📸 Detected as full image');
-            displayCameraImage(payload);
-        }
-        return;
-    }
     
     if (topic === topics.cameraResponse) {
         console.log('📸 Camera response:', payload);
@@ -1300,190 +1282,6 @@ function initReconnectButton() {
     }
 }
 
-// ================================================================
-// ESP32-CAM IMAGE HANDLING - FIXED
-// ================================================================
-
-function displayCameraImage(base64Data) {
-    console.log('📸 Displaying camera image...');
-    console.log('📸 Base64 data length:', base64Data.length);
-    console.log('📸 First 100 chars:', base64Data.substring(0, 100));
-    
-    const canvas = DOM.cameraCanvas;
-    const ctx = canvas.getContext('2d');
-    const placeholder = DOM.cameraPlaceholder;
-    const loading = DOM.cameraLoading;
-    const btnCapture = DOM.btnCaptureImage;
-    const statusBadge = DOM.cameraStatusBadge;
-    const metaStatus = DOM.cameraMetaStatus;
-    
-    if (!canvas) {
-        console.error('❌ Camera canvas not found!');
-        return;
-    }
-    
-    // ==========================================================
-    // CEK APAKAH BASE64 VALID
-    // ==========================================================
-    
-    if (!base64Data || base64Data.length < 100) {
-        console.error('❌ Base64 data too short or empty!');
-        showToast('❌ Invalid image data', 'error');
-        if (loading) loading.classList.add('hidden');
-        if (btnCapture) btnCapture.disabled = false;
-        return;
-    }
-    
-    // Cek apakah base64 dimulai dengan marker JPEG
-    if (!base64Data.startsWith('/9j/')) {
-        console.warn('⚠️ Base64 does not start with JPEG marker (/9j/)');
-        console.warn('⚠️ First 50 chars:', base64Data.substring(0, 50));
-        // Tetap lanjutkan, mungkin masih bisa ditampilkan
-    }
-    
-    // ==========================================================
-    // TAMPILKAN GAMBAR
-    // ==========================================================
-    
-    const img = new Image();
-    
-    img.onload = function() {
-        console.log('✅ Image loaded successfully!');
-        console.log('📐 Image size:', img.width, 'x', img.height);
-        
-        // Set canvas size sesuai gambar
-        canvas.width = img.width;
-        canvas.height = img.height;
-        
-        // Gambar dengan background putih agar lebih terang
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        
-        // Tampilkan canvas
-        canvas.classList.remove('hidden');
-        if (placeholder) placeholder.classList.add('hidden');
-        if (loading) loading.classList.add('hidden');
-        if (btnCapture) btnCapture.disabled = false;
-        
-        // Update status
-        if (statusBadge) {
-            statusBadge.textContent = 'IMAGE READY';
-            statusBadge.className = 'badge badge-success';
-            statusBadge.style.borderColor = '';
-            statusBadge.style.color = '';
-        }
-        if (metaStatus) {
-            metaStatus.textContent = 'IMAGE RECEIVED';
-            metaStatus.className = 'meta-val status-online';
-            metaStatus.style.color = '';
-        }
-        
-        // Tambahkan ke gallery
-        const timeStr = new Date().toTimeString().split(' ')[0];
-        addRecentCapture({
-            id: Date.now(),
-            image: canvas.toDataURL('image/jpeg', 0.9),
-            timestamp: timeStr,
-            temp: state.temperature,
-            moisture: state.soilMoisture
-        });
-        
-        showToast('📸 Image received from ESP32-CAM!', 'success');
-        console.log('✅ Display complete!');
-    };
-    
-    img.onerror = function(e) {
-        console.error('❌ Failed to decode image:', e);
-        console.error('❌ Base64 data (first 200 chars):', base64Data.substring(0, 200));
-        console.error('❌ Base64 data (last 50 chars):', base64Data.substring(base64Data.length - 50));
-        showToast('❌ Failed to decode image', 'error');
-        if (loading) loading.classList.add('hidden');
-        if (btnCapture) btnCapture.disabled = false;
-        
-        // Tampilkan error di canvas
-        canvas.classList.remove('hidden');
-        canvas.width = 640;
-        canvas.height = 480;
-        ctx.fillStyle = '#1a1a2e';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#ef4444';
-        ctx.font = '20px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('❌ Failed to load image', canvas.width/2, canvas.height/2 - 10);
-        ctx.fillStyle = '#6b7280';
-        ctx.font = '14px Arial';
-        ctx.fillText('Check console for details', canvas.width/2, canvas.height/2 + 30);
-        
-        if (placeholder) placeholder.classList.add('hidden');
-    };
-    
-    // Set src dengan format yang benar
-    const fullDataUrl = 'data:image/jpeg;base64,' + base64Data;
-    console.log('📸 Image src length:', fullDataUrl.length);
-    img.src = fullDataUrl;
-    console.log('📸 Image src set, waiting for load...');
-}
-
-// ==================== CAMERA IMAGE CHUNK HANDLER ====================
-
-function handleImageChunk(payload) {
-    console.log('📦 Handling chunk:', payload.substring(0, 50));
-    
-    const parts = payload.split(':');
-    if (parts.length !== 2) {
-        console.error('❌ Invalid chunk format');
-        return;
-    }
-    
-    const metaParts = parts[0].split('/');
-    if (metaParts.length !== 2) {
-        console.error('❌ Invalid chunk meta');
-        return;
-    }
-    
-    const chunkNum = parseInt(metaParts[0]);
-    const totalChunks = parseInt(metaParts[1]);
-    const chunkData = parts[1];
-    
-    console.log(`📦 Chunk ${chunkNum}/${totalChunks}`);
-    
-    if (!imageChunks[totalChunks]) {
-        imageChunks[totalChunks] = {};
-        imageChunkTotal = totalChunks;
-    }
-    
-    imageChunks[totalChunks][chunkNum] = chunkData;
-    
-    // Cek apakah semua chunk sudah diterima
-    let allReceived = true;
-    let receivedCount = 0;
-    for (let i = 1; i <= totalChunks; i++) {
-        if (imageChunks[totalChunks][i]) {
-            receivedCount++;
-        } else {
-            allReceived = false;
-            break;
-        }
-    }
-    
-    console.log(`📦 Received ${receivedCount}/${totalChunks} chunks`);
-    
-    if (allReceived) {
-        console.log('📦 All chunks received, combining...');
-        let fullImage = '';
-        for (let i = 1; i <= totalChunks; i++) {
-            fullImage += imageChunks[totalChunks][i];
-        }
-        
-        console.log('📦 Combined image length:', fullImage.length);
-        displayCameraImage(fullImage);
-        
-        // Clear chunks
-        delete imageChunks[totalChunks];
-    }
-}
-
 // ==================== CAMERA STATUS UPDATE ====================
 
 function updateCameraStatus(data) {
@@ -1563,6 +1361,7 @@ function initCameraModule() {
     }
 }
 
+// ==================== CAPTURE IMAGE - VIA HTTP ====================
 function captureImage() {
     // Show loading
     if (DOM.cameraLoading) DOM.cameraLoading.classList.remove('hidden');
@@ -1593,22 +1392,91 @@ function captureImage() {
         DOM.cameraStatusBadge.style.color = 'var(--accent-amber)';
     }
     
-    // Timeout jika tidak ada response
+    // ==========================================================
+    // AMBIL GAMBAR VIA HTTP
+    // ==========================================================
+    
+    // Tunggu 2 detik agar ESP32-CAM selesai capture
     setTimeout(() => {
-        if (DOM.cameraLoading && !DOM.cameraLoading.classList.contains('hidden')) {
-            DOM.cameraLoading.classList.add('hidden');
+        // Ambil gambar dari ESP32-CAM via HTTP
+        const espIP = state.espCamIP;
+        const imgUrl = `http://${espIP}/capture?t=${Date.now()}`;
+        
+        console.log('📸 Fetching image from:', imgUrl);
+        
+        const canvas = DOM.cameraCanvas;
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        
+        img.onload = function() {
+            console.log('✅ Image loaded from ESP32-CAM!');
+            console.log('📐 Image size:', img.width, 'x', img.height);
+            
+            // Set canvas size sesuai gambar
+            canvas.width = img.width;
+            canvas.height = img.height;
+            
+            // Gambar dengan background putih
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            
+            // Tampilkan canvas
+            canvas.classList.remove('hidden');
+            if (DOM.cameraPlaceholder) DOM.cameraPlaceholder.classList.add('hidden');
+            if (DOM.cameraLoading) DOM.cameraLoading.classList.add('hidden');
+            if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
+            
+            // Update status
+            if (DOM.cameraStatusBadge) {
+                DOM.cameraStatusBadge.textContent = 'IMAGE READY';
+                DOM.cameraStatusBadge.className = 'badge badge-success';
+                DOM.cameraStatusBadge.style.borderColor = '';
+                DOM.cameraStatusBadge.style.color = '';
+            }
+            if (DOM.cameraMetaStatus) {
+                DOM.cameraMetaStatus.textContent = 'IMAGE RECEIVED';
+                DOM.cameraMetaStatus.className = 'meta-val status-online';
+                DOM.cameraMetaStatus.style.color = '';
+            }
+            
+            // Tambahkan ke gallery
+            const timeStr = new Date().toTimeString().split(' ')[0];
+            addRecentCapture({
+                id: Date.now(),
+                image: canvas.toDataURL('image/jpeg', 0.9),
+                timestamp: timeStr,
+                temp: state.temperature,
+                moisture: state.soilMoisture
+            });
+            
+            showToast('📸 Image captured from ESP32-CAM!', 'success');
+            console.log('✅ Display complete!');
+        };
+        
+        img.onerror = function(e) {
+            console.error('❌ Failed to load image from ESP32-CAM:', e);
+            console.error('❌ URL:', imgUrl);
+            
+            if (DOM.cameraLoading) DOM.cameraLoading.classList.add('hidden');
             if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
             if (DOM.cameraStatusBadge) {
-                DOM.cameraStatusBadge.textContent = 'TIMEOUT';
+                DOM.cameraStatusBadge.textContent = 'HTTP ERROR';
                 DOM.cameraStatusBadge.className = 'badge badge-off';
                 DOM.cameraStatusBadge.style.borderColor = 'var(--accent-red)';
                 DOM.cameraStatusBadge.style.color = 'var(--accent-red)';
             }
-            showToast('⏰ Camera timeout - no response', 'warning');
-        }
-    }, 15000);
+            
+            showToast('❌ Failed to load image from ESP32-CAM', 'error');
+        };
+        
+        img.src = imgUrl;
+        console.log('📸 Image request sent to ESP32-CAM');
+        
+    }, 2500); // Tunggu 2.5 detik agar ESP32-CAM selesai capture
 }
 
+// ==================== SIMULATE CAPTURE (FALLBACK) ====================
 function simulateCapture() {
     if (DOM.cameraLoading) DOM.cameraLoading.classList.add('hidden');
     if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
@@ -1684,7 +1552,7 @@ function simulateCapture() {
     ctx.fillText(`TEMP: ${state.temperature || '--'}°C  SOIL: ${state.soilMoisture || '--'}%`, margin + 20, margin + 58);
     
     canvas.classList.remove('hidden');
-    DOM.cameraPlaceholder.classList.add('hidden');
+    if (DOM.cameraPlaceholder) DOM.cameraPlaceholder.classList.add('hidden');
     
     const dataUrl = canvas.toDataURL('image/png');
     addRecentCapture({
@@ -1696,17 +1564,18 @@ function simulateCapture() {
     });
     
     if (DOM.cameraStatusBadge) {
-        DOM.cameraStatusBadge.textContent = 'CAPTURED';
+        DOM.cameraStatusBadge.textContent = 'SIMULATED';
         DOM.cameraStatusBadge.className = 'badge badge-success';
     }
     if (DOM.cameraMetaStatus) {
-        DOM.cameraMetaStatus.textContent = 'CAPTURED';
+        DOM.cameraMetaStatus.textContent = 'SIMULATED';
         DOM.cameraMetaStatus.className = 'meta-val status-online';
     }
     
-    showToast('📸 Image captured successfully!', 'success');
+    showToast('📸 Simulated capture (MQTT not connected)', 'warning');
 }
 
+// ==================== RECENT CAPTURES ====================
 function addRecentCapture(capture) {
     recentCaptures.unshift(capture);
     if (recentCaptures.length > 3) {
