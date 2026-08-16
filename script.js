@@ -1,6 +1,6 @@
 /* ==========================================================================
    SMART FARMING IOT DASHBOARD - FULL MQTT INTEGRATION v2.1
-   DENGAN ESP32-CAM SUPPORT - HTTP IMAGE
+   DENGAN ESP32-CAM SUPPORT - HTTP IMAGE + CORS FIX
    ========================================================================== */
 
 // ==================== MQTT CONFIGURATION ====================
@@ -89,8 +89,8 @@ const state = {
     quickWaterActive: false,
     quickWaterCountdown: 0,
     
-    // ESP32-CAM IP
-    espCamIP: '192.168.0.21' // Ganti dengan IP ESP32-CAM kamu
+    // ESP32-CAM IP - UPDATE DENGAN IP YANG BENAR!
+    espCamIP: '192.168.0.13' // ← GANTI dengan IP dari Serial Monitor
 };
 
 // ==================== DOM REFERENCES ====================
@@ -1361,7 +1361,7 @@ function initCameraModule() {
     }
 }
 
-// ==================== CAPTURE IMAGE - VIA HTTP ====================
+// ==================== CAPTURE IMAGE - VIA HTTP DENGAN CORS FIX ====================
 function captureImage() {
     // Show loading
     if (DOM.cameraLoading) DOM.cameraLoading.classList.remove('hidden');
@@ -1393,12 +1393,11 @@ function captureImage() {
     }
     
     // ==========================================================
-    // AMBIL GAMBAR VIA HTTP
+    // AMBIL GAMBAR VIA HTTP - DENGAN CORS FIX
     // ==========================================================
     
-    // Tunggu 2 detik agar ESP32-CAM selesai capture
+    // Tunggu 2.5 detik agar ESP32-CAM selesai capture
     setTimeout(() => {
-        // Ambil gambar dari ESP32-CAM via HTTP
         const espIP = state.espCamIP;
         const imgUrl = `http://${espIP}/capture?t=${Date.now()}`;
         
@@ -1406,74 +1405,102 @@ function captureImage() {
         
         const canvas = DOM.cameraCanvas;
         const ctx = canvas.getContext('2d');
-        const img = new Image();
         
-        img.onload = function() {
-            console.log('✅ Image loaded from ESP32-CAM!');
-            console.log('📐 Image size:', img.width, 'x', img.height);
+        // ==========================================================
+        // FIX: Gunakan fetch untuk mengatasi Mixed Content & CORS
+        // ==========================================================
+        
+        fetch(imgUrl, {
+            mode: 'cors',
+            cache: 'no-store',
+            headers: {
+                'Accept': 'image/jpeg'
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status} - ${response.statusText}`);
+            }
+            return response.blob();
+        })
+        .then(blob => {
+            // Konversi blob ke object URL (ini akan dianggap secure)
+            const objectUrl = URL.createObjectURL(blob);
             
-            // Set canvas size sesuai gambar
-            canvas.width = img.width;
-            canvas.height = img.height;
+            const img = new Image();
+            img.onload = function() {
+                console.log('✅ Image loaded from ESP32-CAM!');
+                console.log('📐 Image size:', img.width, 'x', img.height);
+                
+                // Set canvas size sesuai gambar
+                canvas.width = img.width;
+                canvas.height = img.height;
+                
+                // Gambar dengan background putih
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                
+                // Tampilkan canvas
+                canvas.classList.remove('hidden');
+                if (DOM.cameraPlaceholder) DOM.cameraPlaceholder.classList.add('hidden');
+                if (DOM.cameraLoading) DOM.cameraLoading.classList.add('hidden');
+                if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
+                
+                // Update status
+                if (DOM.cameraStatusBadge) {
+                    DOM.cameraStatusBadge.textContent = 'IMAGE READY';
+                    DOM.cameraStatusBadge.className = 'badge badge-success';
+                    DOM.cameraStatusBadge.style.borderColor = '';
+                    DOM.cameraStatusBadge.style.color = '';
+                }
+                if (DOM.cameraMetaStatus) {
+                    DOM.cameraMetaStatus.textContent = 'IMAGE RECEIVED';
+                    DOM.cameraMetaStatus.className = 'meta-val status-online';
+                    DOM.cameraMetaStatus.style.color = '';
+                }
+                
+                // Tambahkan ke gallery
+                const timeStr = new Date().toTimeString().split(' ')[0];
+                addRecentCapture({
+                    id: Date.now(),
+                    image: canvas.toDataURL('image/jpeg', 0.9),
+                    timestamp: timeStr,
+                    temp: state.temperature,
+                    moisture: state.soilMoisture
+                });
+                
+                showToast('📸 Image captured from ESP32-CAM!', 'success');
+                console.log('✅ Display complete!');
+                
+                // Cleanup object URL
+                URL.revokeObjectURL(objectUrl);
+            };
             
-            // Gambar dengan background putih
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            img.onerror = function(e) {
+                console.error('❌ Failed to decode image:', e);
+                if (DOM.cameraLoading) DOM.cameraLoading.classList.add('hidden');
+                if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
+                showToast('❌ Failed to decode image', 'error');
+                URL.revokeObjectURL(objectUrl);
+            };
             
-            // Tampilkan canvas
-            canvas.classList.remove('hidden');
-            if (DOM.cameraPlaceholder) DOM.cameraPlaceholder.classList.add('hidden');
+            img.src = objectUrl;
+        })
+        .catch(error => {
+            console.error('❌ Fetch error:', error);
             if (DOM.cameraLoading) DOM.cameraLoading.classList.add('hidden');
             if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
-            
-            // Update status
             if (DOM.cameraStatusBadge) {
-                DOM.cameraStatusBadge.textContent = 'IMAGE READY';
-                DOM.cameraStatusBadge.className = 'badge badge-success';
-                DOM.cameraStatusBadge.style.borderColor = '';
-                DOM.cameraStatusBadge.style.color = '';
-            }
-            if (DOM.cameraMetaStatus) {
-                DOM.cameraMetaStatus.textContent = 'IMAGE RECEIVED';
-                DOM.cameraMetaStatus.className = 'meta-val status-online';
-                DOM.cameraMetaStatus.style.color = '';
-            }
-            
-            // Tambahkan ke gallery
-            const timeStr = new Date().toTimeString().split(' ')[0];
-            addRecentCapture({
-                id: Date.now(),
-                image: canvas.toDataURL('image/jpeg', 0.9),
-                timestamp: timeStr,
-                temp: state.temperature,
-                moisture: state.soilMoisture
-            });
-            
-            showToast('📸 Image captured from ESP32-CAM!', 'success');
-            console.log('✅ Display complete!');
-        };
-        
-        img.onerror = function(e) {
-            console.error('❌ Failed to load image from ESP32-CAM:', e);
-            console.error('❌ URL:', imgUrl);
-            
-            if (DOM.cameraLoading) DOM.cameraLoading.classList.add('hidden');
-            if (DOM.btnCaptureImage) DOM.btnCaptureImage.disabled = false;
-            if (DOM.cameraStatusBadge) {
-                DOM.cameraStatusBadge.textContent = 'HTTP ERROR';
+                DOM.cameraStatusBadge.textContent = 'FETCH ERROR';
                 DOM.cameraStatusBadge.className = 'badge badge-off';
                 DOM.cameraStatusBadge.style.borderColor = 'var(--accent-red)';
                 DOM.cameraStatusBadge.style.color = 'var(--accent-red)';
             }
-            
-            showToast('❌ Failed to load image from ESP32-CAM', 'error');
-        };
+            showToast(`❌ Failed to fetch image: ${error.message}`, 'error');
+        });
         
-        img.src = imgUrl;
-        console.log('📸 Image request sent to ESP32-CAM');
-        
-    }, 2500); // Tunggu 2.5 detik agar ESP32-CAM selesai capture
+    }, 2500);
 }
 
 // ==================== SIMULATE CAPTURE (FALLBACK) ====================
